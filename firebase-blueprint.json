@@ -1,0 +1,286 @@
+{
+  "entities": {
+    "AdminUser": {
+      "title": "Administrador Distrital",
+      "description": "Registro de usuarios con privilegios administrativos en el Distrito Educativo N° 18-B.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "email": { "type": "string", "format": "email", "maxLength": 254 },
+        "displayName": { "type": "string", "maxLength": 160 },
+        "position": { "type": "string", "enum": ["administrador", "asistente_tecnico"], "description": "Cargo administrativo en la Dirección Distrital." },
+        "addedBy": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "displayName", "addedBy", "createdAt"]
+    },
+    "School": {
+      "title": "Centro Educativo",
+      "description": "Catálogo oficial de centros educativos del Distrito N° 18-B de Omoa.",
+      "type": "object",
+      "properties": {
+        "saceCode": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "name": { "type": "string", "minLength": 2, "maxLength": 200 },
+        "community": { "type": "string", "maxLength": 160 },
+        "district": { "type": "string", "enum": ["18", "18-B"], "description": "Distrito educativo del municipio al que pertenece el centro (Distrito 18 o Distrito 18-B)." },
+        "levels": { "type": "array", "description": "Niveles educativos habilitados (prebasica, basica, media)" },
+        "basicaScope": { "type": "string", "enum": ["c1_2", "c3", "c1_2_3"], "description": "Subnivel de Básica habilitado (I y II Ciclo, III Ciclo, o I, II y III Ciclo)" },
+        "prebasicaType": { "type": "string", "enum": ["CEPB", "CCEPREB", "CEP-U"], "description": "Tipo de centro de Preescolar/Prebásica (CEPB, CCEPREB o CEP-U)" },
+        "basicaType": { "type": "string", "enum": ["gubernamental", "proheco"], "description": "Tipo de centro de Básica (Gubernamental o PROHECO)" },
+        "sector": { "type": "string", "enum": ["gubernamental", "no_gubernamental"] },
+        "modality": { "type": "string", "enum": ["presencial", "isemed", "acelerado"] },
+        "directorUid": { "type": "string", "maxLength": 128 },
+        "directorDisplayName": { "type": "string", "maxLength": 160 },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["saceCode", "name", "community", "levels", "sector", "modality", "directorUid", "directorDisplayName", "active", "createdAt", "updatedAt"]
+    },
+    "UserProfile": {
+      "title": "Perfil de Usuario",
+      "description": "Cuenta autenticada con rol asignado y centro educativo vinculado.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "email": { "type": "string", "format": "email", "maxLength": 254 },
+        "displayName": { "type": "string", "maxLength": 160 },
+        "dni": { "type": "string", "maxLength": 30 },
+        "role": { "type": "string", "enum": ["pending", "director", "admin"] },
+        "adminPosition": { "type": "string", "enum": ["administrador", "asistente_tecnico"], "description": "Subtipo o cargo para usuarios con rol administrador." },
+        "needsOnboarding": { "type": "boolean", "description": "Indica si una cuenta pre-creada por el administrador debe completar sus datos al primer ingreso." },
+        "schoolId": { "type": "string", "maxLength": 128 },
+        "schoolName": { "type": "string", "maxLength": 200 },
+        "saceCode": { "type": "string", "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "displayName", "dni", "role", "schoolId", "schoolName", "saceCode", "createdAt", "updatedAt"]
+    },
+    "DirectorRequest": {
+      "title": "Solicitud de Vinculación de Director",
+      "description": "Solicitud enviada por un director al iniciar sesión para vincularse a un centro educativo.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "email": { "type": "string", "format": "email", "maxLength": 254 },
+        "displayName": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "dni": { "type": "string", "minLength": 3, "maxLength": 30 },
+        "requestType": { "type": "string", "enum": ["existing_school", "new_school"] },
+        "schoolId": { "type": "string", "maxLength": 128 },
+        "proposedSchoolName": { "type": "string", "maxLength": 200 },
+        "proposedSaceCode": { "type": "string", "maxLength": 40 },
+        "proposedCommunity": { "type": "string", "maxLength": 160 },
+        "proposedDistrict": { "type": "string", "enum": ["18", "18-B"], "description": "Distrito educativo seleccionado por el director (Distrito 18 o Distrito 18-B)." },
+        "proposedLevels": { "type": "array" },
+        "proposedBasicaScope": { "type": "string", "enum": ["c1_2", "c3", "c1_2_3"] },
+        "proposedPrebasicaType": { "type": "string", "enum": ["CEPB", "CCEPREB", "CEP-U"] },
+        "proposedBasicaType": { "type": "string", "enum": ["gubernamental", "proheco"] },
+        "directorPhone": { "type": "string", "maxLength": 30 },
+        "proposedSector": { "type": "string", "enum": ["gubernamental", "no_gubernamental"] },
+        "proposedModality": { "type": "string", "enum": ["presencial", "isemed", "acelerado"] },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "reviewComment": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "displayName", "dni", "requestType", "schoolId", "proposedSchoolName", "proposedSaceCode", "proposedCommunity", "proposedLevels", "proposedSector", "proposedModality", "status", "reviewComment", "createdAt", "updatedAt"]
+    },
+    "MonthlyReport": {
+      "title": "Reporte Mensual de Movimientos SACE",
+      "description": "Registro mensual de ingresos, traslados y desertores por centro educativo y nivel.",
+      "type": "object",
+      "properties": {
+        "year": { "type": "integer" },
+        "month": { "type": "integer" },
+        "schoolId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "schoolName": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "saceCode": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "level": { "type": "string", "enum": ["prebasica", "basica", "media"] },
+        "directorUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "directorName": { "type": "string", "maxLength": 160 },
+        "ingresos": { "type": "array" },
+        "traslados": { "type": "array" },
+        "desertores": { "type": "array" },
+        "noMovements": { "type": "boolean", "description": "Indica que el centro declaró explícitamente el mes en 0 sin movimientos." },
+        "status": { "type": "string", "enum": ["draft", "submitted", "approved", "returned"] },
+        "reviewComment": { "type": "string", "maxLength": 600 },
+        "reviewedByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["year", "month", "schoolId", "schoolName", "saceCode", "level", "directorUid", "directorName", "ingresos", "traslados", "desertores", "status", "reviewComment", "reviewedByUid", "createdAt", "updatedAt"]
+    },
+    "AnnualReport": {
+      "title": "Reporte Estadístico Anual",
+      "description": "Matrices anuales SACE por nivel educativo (estadístico final, edades, áreas, evaluación y egresados).",
+      "type": "object",
+      "properties": {
+        "year": { "type": "integer" },
+        "schoolId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "schoolName": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "saceCode": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "community": { "type": "string", "maxLength": 160 },
+        "sector": { "type": "string", "enum": ["gubernamental", "no_gubernamental"] },
+        "modality": { "type": "string", "enum": ["presencial", "isemed", "acelerado"] },
+        "level": { "type": "string", "enum": ["prebasica", "basica", "media"] },
+        "directorUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "directorName": { "type": "string", "maxLength": 160 },
+        "directorDni": { "type": "string", "maxLength": 30 },
+        "placeAndDate": { "type": "string", "maxLength": 160 },
+        "data": { "type": "object" },
+        "status": { "type": "string", "enum": ["draft", "submitted", "approved", "returned"] },
+        "reviewComment": { "type": "string", "maxLength": 600 },
+        "reviewedByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["year", "schoolId", "schoolName", "saceCode", "community", "sector", "modality", "level", "directorUid", "directorName", "directorDni", "placeAndDate", "data", "status", "reviewComment", "reviewedByUid", "createdAt", "updatedAt"]
+    },
+    "ParteMensualReport": {
+      "title": "Reporte de Parte Mensual",
+      "description": "Cuadro estadístico mensual de matrícula, inasistencias, asistencia media, porcentaje e ingresos/traslados/desertores por nivel.",
+      "type": "object",
+      "properties": {
+        "year": { "type": "integer" },
+        "month": { "type": "integer" },
+        "schoolId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "schoolName": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "saceCode": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "lugar": { "type": "string", "maxLength": 160 },
+        "level": { "type": "string", "enum": ["prebasica", "basica", "media"] },
+        "directorUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "directorName": { "type": "string", "maxLength": 160 },
+        "diasTrabajados": { "type": "integer" },
+        "rows": { "type": "object" },
+        "status": { "type": "string", "enum": ["draft", "submitted", "approved", "returned"] },
+        "reviewComment": { "type": "string", "maxLength": 600 },
+        "reviewedByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["year", "month", "schoolId", "schoolName", "saceCode", "lugar", "level", "directorUid", "directorName", "diasTrabajados", "rows", "status", "reviewComment", "reviewedByUid", "createdAt", "updatedAt"]
+    },
+    "DistrictActivity": {
+      "title": "Actividad Distrital",
+      "description": "Actividad o evidencia solicitada por la Dirección Distrital por parcial y fecha máxima de entrega.",
+      "type": "object",
+      "properties": {
+        "year": { "type": "integer" },
+        "parcial": { "type": "integer" },
+        "title": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "description": { "type": "string", "maxLength": 600 },
+        "dueDate": { "type": "string", "minLength": 10, "maxLength": 10 },
+        "assignmentMode": { "type": "string", "enum": ["levels", "schools"] },
+        "targetLevels": { "type": "array" },
+        "targetBasicaScopes": { "type": "array" },
+        "targetSchoolIds": { "type": "array" },
+        "assignedDirectorUids": { "type": "array" },
+        "active": { "type": "boolean" },
+        "createdByUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["year", "parcial", "title", "description", "dueDate", "assignmentMode", "targetLevels", "targetBasicaScopes", "targetSchoolIds", "assignedDirectorUids", "active", "createdByUid", "createdAt", "updatedAt"]
+    },
+    "ActivityCompliance": {
+      "title": "Cumplimiento de Actividad por Centro",
+      "description": "Estado de entrega validado por el administrador distrital tras revisar evidencias de WhatsApp.",
+      "type": "object",
+      "properties": {
+        "activityId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "year": { "type": "integer" },
+        "parcial": { "type": "integer" },
+        "schoolId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "saceCode": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "schoolName": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "directorUid": { "type": "string", "maxLength": 128 },
+        "completed": { "type": "boolean" },
+        "completedDate": { "type": "string", "maxLength": 10 },
+        "note": { "type": "string", "maxLength": 400 },
+        "updatedByUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["activityId", "year", "parcial", "schoolId", "saceCode", "schoolName", "directorUid", "completed", "completedDate", "note", "updatedByUid", "createdAt", "updatedAt"]
+    },
+    "DistrictDeadlines": {
+      "title": "Fechas Límite de Cuadros Estadísticos",
+      "description": "Configuración anual de fechas límite de entrega para Parte Mensual, Movimientos-SACE y Cuadros Anuales.",
+      "type": "object",
+      "properties": {
+        "year": { "type": "integer" },
+        "parteMensualMonth": { "type": "integer" },
+        "parteMensualDeadline": { "type": "string", "maxLength": 16 },
+        "movimientosMonth": { "type": "integer" },
+        "movimientosDeadline": { "type": "string", "maxLength": 16 },
+        "annualDeadline": { "type": "string", "maxLength": 16 },
+        "parteMensualByMonth": { "type": "object", "description": "Mapa opcional de mes (1-12) a fecha límite YYYY-MM-DDTHH:mm para Parte Mensual." },
+        "movimientosByMonth": { "type": "object", "description": "Mapa opcional de mes (1-12) a fecha límite YYYY-MM-DDTHH:mm para Movimientos-SACE." },
+        "updatedByUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["year", "parteMensualMonth", "parteMensualDeadline", "movimientosMonth", "movimientosDeadline", "annualDeadline", "updatedByUid", "createdAt", "updatedAt"]
+    },
+    "SchoolContact": {
+      "title": "Contacto de Centro Educativo",
+      "description": "Teléfono del director aislado por privacidad (solo accesible para administradores y director del centro).",
+      "type": "object",
+      "properties": {
+        "schoolId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "directorPhone": { "type": "string", "maxLength": 30 },
+        "updatedByUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["schoolId", "directorPhone", "updatedByUid", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/admins/{uid}": {
+      "schema": { "$ref": "#/entities/AdminUser" },
+      "description": "Documentos de administradores distritales autorizados."
+    },
+    "/schools/{schoolId}": {
+      "schema": { "$ref": "#/entities/School" },
+      "description": "Catálogo maestro de centros educativos del Distrito 18-B."
+    },
+    "/schoolContacts/{schoolId}": {
+      "schema": { "$ref": "#/entities/SchoolContact" },
+      "description": "Información de contacto telefónico del director de cada centro educativo."
+    },
+    "/users/{uid}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Perfiles de usuario con aislamiento de PII y asignación de rol/centro."
+    },
+    "/directorRequests/{uid}": {
+      "schema": { "$ref": "#/entities/DirectorRequest" },
+      "description": "Solicitudes de vinculación de directores pendientes de aprobación distrital."
+    },
+    "/monthlyReports/{reportId}": {
+      "schema": { "$ref": "#/entities/MonthlyReport" },
+      "description": "Reportes mensuales de movimientos SACE por centro y nivel."
+    },
+    "/parteMensualReports/{reportId}": {
+      "schema": { "$ref": "#/entities/ParteMensualReport" },
+      "description": "Partes mensuales estadísticos y de asistencia por centro y nivel."
+    },
+    "/annualReports/{reportId}": {
+      "schema": { "$ref": "#/entities/AnnualReport" },
+      "description": "Cuadros estadísticos anuales SACE por centro y nivel."
+    },
+    "/activities/{activityId}": {
+      "schema": { "$ref": "#/entities/DistrictActivity" },
+      "description": "Actividades y evidencias solicitadas por parcial en el Distrito 18-B."
+    },
+    "/activityCompliances/{complianceId}": {
+      "schema": { "$ref": "#/entities/ActivityCompliance" },
+      "description": "Registros de cumplimiento validados por el administrador para cada centro y actividad."
+    },
+    "/districtConfig/{configId}": {
+      "schema": { "$ref": "#/entities/DistrictDeadlines" },
+      "description": "Fechas límite configuradas por la Dirección Distrital para cuadros estadísticos."
+    }
+  }
+}

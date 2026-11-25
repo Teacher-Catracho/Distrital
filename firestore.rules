@@ -1,0 +1,803 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Primitive Helpers
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isActiveAuthUser() {
+      return isSignedIn() && (
+        request.auth.token.email_verified == true ||
+        request.auth.token.firebase.sign_in_provider == 'password'
+      );
+    }
+
+    function isPrimaryAdmin() {
+      return isActiveAuthUser() &&
+        request.auth.token.email == 'sace.1613199100383@sace18b.omoa.hn';
+    }
+
+    function isAdmin() {
+      return isPrimaryAdmin() || (
+        isActiveAuthUser() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isDirectorOfSchool(schoolId) {
+      return isActiveAuthUser() &&
+        isValidId(schoolId) &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        getUserData().role == 'director' &&
+        getUserData().schoolId == schoolId;
+    }
+
+    function isUserInProvisionedOnboarding() {
+      return isActiveAuthUser() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        ('needsOnboarding' in getUserData()) &&
+        getUserData().needsOnboarding == true &&
+        getUserData().saceCode is string &&
+        getUserData().saceCode.size() >= 1;
+    }
+
+    function isCompletingProvisionedOnboarding(saceCode) {
+      return isUserInProvisionedOnboarding() &&
+        saceCode is string &&
+        getUserData().saceCode.lower() == saceCode.lower();
+    }
+
+    function isValidLevelList(levels) {
+      return levels is list &&
+        levels.size() >= 1 &&
+        levels.size() <= 3 &&
+        levels.hasOnly(['prebasica', 'basica', 'media']);
+    }
+
+    // 3. Entity Validators
+    function isValidAdminUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'addedBy', 'createdAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'displayName', 'position', 'addedBy', 'createdAt']) &&
+        isValidId(data.uid) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 254 &&
+        data.displayName is string && data.displayName.size() <= 160 &&
+        (!('position' in data) || data.position in ['administrador', 'asistente_tecnico']) &&
+        data.addedBy is string && data.addedBy.size() <= 128 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidSchool(data) {
+      return data.keys().hasAll([
+          'saceCode', 'name', 'community', 'levels', 'sector', 'modality',
+          'directorUid', 'directorDisplayName', 'active', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'saceCode', 'name', 'community', 'district', 'levels', 'basicaScope', 'prebasicaType', 'basicaType',
+          'sector', 'modality', 'directorUid', 'directorDisplayName', 'active', 'createdAt', 'updatedAt'
+        ]) &&
+        data.saceCode is string && data.saceCode.size() >= 1 && data.saceCode.size() <= 40 &&
+        data.name is string && data.name.size() >= 2 && data.name.size() <= 200 &&
+        data.community is string && data.community.size() <= 160 &&
+        (!('district' in data) || data.district in ['18', '18-B']) &&
+        isValidLevelList(data.levels) &&
+        (!('basicaScope' in data) || data.basicaScope in ['c1_2', 'c3', 'c1_2_3']) &&
+        (!('prebasicaType' in data) || data.prebasicaType in ['CEPB', 'CCEPREB', 'CEP-U']) &&
+        (!('basicaType' in data) || data.basicaType in ['gubernamental', 'proheco']) &&
+        data.sector in ['gubernamental', 'no_gubernamental'] &&
+        data.modality in ['presencial', 'isemed', 'acelerado'] &&
+        data.directorUid is string && data.directorUid.size() <= 128 &&
+        data.directorDisplayName is string && data.directorDisplayName.size() <= 160 &&
+        data.active is bool &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasAll([
+          'uid', 'email', 'displayName', 'dni', 'role',
+          'schoolId', 'schoolName', 'saceCode', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'uid', 'email', 'displayName', 'dni', 'role', 'adminPosition', 'needsOnboarding',
+          'schoolId', 'schoolName', 'saceCode', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.uid) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 254 &&
+        data.displayName is string && data.displayName.size() <= 160 &&
+        data.dni is string && data.dni.size() <= 30 &&
+        data.role in ['pending', 'director', 'admin'] &&
+        (!('adminPosition' in data) || data.adminPosition in ['administrador', 'asistente_tecnico']) &&
+        (!('needsOnboarding' in data) || data.needsOnboarding is bool) &&
+        data.schoolId is string && data.schoolId.size() <= 128 &&
+        data.schoolName is string && data.schoolName.size() <= 200 &&
+        data.saceCode is string && data.saceCode.size() <= 40 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidDirectorRequest(data) {
+      return data.keys().hasAll([
+          'uid', 'email', 'displayName', 'dni', 'requestType', 'schoolId',
+          'proposedSchoolName', 'proposedSaceCode', 'proposedCommunity',
+          'proposedLevels', 'proposedSector', 'proposedModality',
+          'status', 'reviewComment', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'uid', 'email', 'displayName', 'dni', 'requestType', 'schoolId',
+          'proposedSchoolName', 'proposedSaceCode', 'proposedCommunity', 'proposedDistrict',
+          'proposedLevels', 'proposedBasicaScope', 'proposedPrebasicaType', 'proposedBasicaType',
+          'directorPhone', 'proposedSector', 'proposedModality',
+          'status', 'reviewComment', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.uid) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 254 &&
+        data.displayName is string && data.displayName.size() >= 2 && data.displayName.size() <= 160 &&
+        data.dni is string && data.dni.size() >= 3 && data.dni.size() <= 30 &&
+        data.requestType in ['existing_school', 'new_school'] &&
+        data.schoolId is string && data.schoolId.size() <= 128 &&
+        data.proposedSchoolName is string && data.proposedSchoolName.size() <= 200 &&
+        data.proposedSaceCode is string && data.proposedSaceCode.size() <= 40 &&
+        data.proposedCommunity is string && data.proposedCommunity.size() <= 160 &&
+        (!('proposedDistrict' in data) || data.proposedDistrict in ['18', '18-B']) &&
+        isValidLevelList(data.proposedLevels) &&
+        (!('proposedBasicaScope' in data) || data.proposedBasicaScope in ['c1_2', 'c3', 'c1_2_3']) &&
+        (!('proposedPrebasicaType' in data) || data.proposedPrebasicaType in ['CEPB', 'CCEPREB', 'CEP-U']) &&
+        (!('proposedBasicaType' in data) || data.proposedBasicaType in ['gubernamental', 'proheco']) &&
+        (!('directorPhone' in data) || (data.directorPhone is string && data.directorPhone.size() <= 30)) &&
+        data.proposedSector in ['gubernamental', 'no_gubernamental'] &&
+        data.proposedModality in ['presencial', 'isemed', 'acelerado'] &&
+        data.status in ['pending', 'approved', 'rejected'] &&
+        data.reviewComment is string && data.reviewComment.size() <= 500 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidMonthlyReport(data) {
+      return data.keys().hasAll([
+          'year', 'month', 'schoolId', 'schoolName', 'saceCode', 'level',
+          'directorUid', 'directorName', 'ingresos', 'traslados', 'desertores',
+          'status', 'reviewComment', 'reviewedByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'year', 'month', 'schoolId', 'schoolName', 'saceCode', 'level',
+          'directorUid', 'directorName', 'ingresos', 'traslados', 'desertores',
+          'noMovements', 'status', 'reviewComment', 'reviewedByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.year is int && data.year >= 2020 && data.year <= 2100 &&
+        data.month is int && data.month >= 1 && data.month <= 12 &&
+        isValidId(data.schoolId) &&
+        data.schoolName is string && data.schoolName.size() >= 1 && data.schoolName.size() <= 200 &&
+        data.saceCode is string && data.saceCode.size() >= 1 && data.saceCode.size() <= 40 &&
+        data.level in ['prebasica', 'basica', 'media'] &&
+        isValidId(data.directorUid) &&
+        data.directorName is string && data.directorName.size() <= 160 &&
+        data.ingresos is list && data.ingresos.size() <= 250 &&
+        (data.ingresos.size() == 0 || data.ingresos[0] is map) &&
+        data.traslados is list && data.traslados.size() <= 250 &&
+        (data.traslados.size() == 0 || data.traslados[0] is map) &&
+        data.desertores is list && data.desertores.size() <= 250 &&
+        (data.desertores.size() == 0 || data.desertores[0] is map) &&
+        (!('noMovements' in data) || (
+          data.noMovements is bool &&
+          (!data.noMovements || (
+            data.ingresos.size() == 0 &&
+            data.traslados.size() == 0 &&
+            data.desertores.size() == 0
+          ))
+        )) &&
+        data.status in ['draft', 'submitted', 'approved', 'returned'] &&
+        data.reviewComment is string && data.reviewComment.size() <= 600 &&
+        data.reviewedByUid is string && data.reviewedByUid.size() <= 128 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAnnualReport(data) {
+      return data.keys().hasAll([
+          'year', 'schoolId', 'schoolName', 'saceCode', 'community', 'sector', 'modality',
+          'level', 'directorUid', 'directorName', 'directorDni', 'placeAndDate',
+          'data', 'status', 'reviewComment', 'reviewedByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'year', 'schoolId', 'schoolName', 'saceCode', 'community', 'sector', 'modality',
+          'level', 'directorUid', 'directorName', 'directorDni', 'placeAndDate',
+          'data', 'status', 'reviewComment', 'reviewedByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.year is int && data.year >= 2020 && data.year <= 2100 &&
+        isValidId(data.schoolId) &&
+        data.schoolName is string && data.schoolName.size() >= 1 && data.schoolName.size() <= 200 &&
+        data.saceCode is string && data.saceCode.size() >= 1 && data.saceCode.size() <= 40 &&
+        data.community is string && data.community.size() <= 160 &&
+        data.sector in ['gubernamental', 'no_gubernamental'] &&
+        data.modality in ['presencial', 'isemed', 'acelerado'] &&
+        data.level in ['prebasica', 'basica', 'media'] &&
+        isValidId(data.directorUid) &&
+        data.directorName is string && data.directorName.size() <= 160 &&
+        data.directorDni is string && data.directorDni.size() <= 30 &&
+        data.placeAndDate is string && data.placeAndDate.size() <= 160 &&
+        data.data is map &&
+        data.status in ['draft', 'submitted', 'approved', 'returned'] &&
+        data.reviewComment is string && data.reviewComment.size() <= 600 &&
+        data.reviewedByUid is string && data.reviewedByUid.size() <= 128 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidParteMensualReport(data) {
+      return data.keys().hasAll([
+          'year', 'month', 'schoolId', 'schoolName', 'saceCode', 'lugar', 'level',
+          'directorUid', 'directorName', 'diasTrabajados', 'rows',
+          'status', 'reviewComment', 'reviewedByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'year', 'month', 'schoolId', 'schoolName', 'saceCode', 'lugar', 'level',
+          'directorUid', 'directorName', 'diasTrabajados', 'rows',
+          'status', 'reviewComment', 'reviewedByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.year is int && data.year >= 2020 && data.year <= 2100 &&
+        data.month is int && data.month >= 1 && data.month <= 12 &&
+        isValidId(data.schoolId) &&
+        data.schoolName is string && data.schoolName.size() >= 1 && data.schoolName.size() <= 200 &&
+        data.saceCode is string && data.saceCode.size() >= 1 && data.saceCode.size() <= 40 &&
+        data.lugar is string && data.lugar.size() <= 160 &&
+        data.level in ['prebasica', 'basica', 'media'] &&
+        isValidId(data.directorUid) &&
+        data.directorName is string && data.directorName.size() <= 160 &&
+        data.diasTrabajados is int && data.diasTrabajados >= 0 && data.diasTrabajados <= 31 &&
+        data.rows is map &&
+        data.status in ['draft', 'submitted', 'approved', 'returned'] &&
+        data.reviewComment is string && data.reviewComment.size() <= 600 &&
+        data.reviewedByUid is string && data.reviewedByUid.size() <= 128 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidDistrictActivity(data) {
+      return data.keys().hasAll([
+          'year', 'parcial', 'title', 'description', 'dueDate', 'assignmentMode',
+          'targetLevels', 'targetBasicaScopes', 'targetSchoolIds', 'assignedDirectorUids',
+          'active', 'createdByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'year', 'parcial', 'title', 'description', 'dueDate', 'assignmentMode',
+          'targetLevels', 'targetBasicaScopes', 'targetSchoolIds', 'assignedDirectorUids',
+          'active', 'createdByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.year is int && data.year >= 2020 && data.year <= 2100 &&
+        data.parcial is int && data.parcial >= 1 && data.parcial <= 4 &&
+        data.title is string && data.title.size() >= 2 && data.title.size() <= 160 &&
+        data.description is string && data.description.size() <= 600 &&
+        data.dueDate is string && data.dueDate.size() == 10 &&
+        data.dueDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+        data.assignmentMode in ['levels', 'schools'] &&
+        data.targetLevels is list &&
+        data.targetLevels.size() <= 3 &&
+        data.targetLevels.hasOnly(['prebasica', 'basica', 'media']) &&
+        data.targetBasicaScopes is list &&
+        data.targetBasicaScopes.size() <= 3 &&
+        data.targetBasicaScopes.hasOnly(['c1_2', 'c3', 'c1_2_3']) &&
+        data.targetSchoolIds is list &&
+        data.targetSchoolIds.size() >= 1 &&
+        data.targetSchoolIds.size() <= 200 &&
+        data.targetSchoolIds[0] is string &&
+        data.assignedDirectorUids is list &&
+        data.assignedDirectorUids.size() <= 200 &&
+        (data.assignedDirectorUids.size() == 0 || data.assignedDirectorUids[0] is string) &&
+        data.active is bool &&
+        isValidId(data.createdByUid) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidActivityCompliance(data) {
+      return data.keys().hasAll([
+          'activityId', 'year', 'parcial', 'schoolId', 'saceCode', 'schoolName',
+          'directorUid', 'completed', 'completedDate', 'note',
+          'updatedByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'activityId', 'year', 'parcial', 'schoolId', 'saceCode', 'schoolName',
+          'directorUid', 'completed', 'completedDate', 'note',
+          'updatedByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.activityId) &&
+        data.year is int && data.year >= 2020 && data.year <= 2100 &&
+        data.parcial is int && data.parcial >= 1 && data.parcial <= 4 &&
+        isValidId(data.schoolId) &&
+        data.saceCode is string && data.saceCode.size() >= 1 && data.saceCode.size() <= 40 &&
+        data.schoolName is string && data.schoolName.size() >= 1 && data.schoolName.size() <= 200 &&
+        data.directorUid is string && data.directorUid.size() <= 128 &&
+        data.completed is bool &&
+        data.completedDate is string && (
+          data.completedDate == '' ||
+          (data.completedDate.size() == 10 && data.completedDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$'))
+        ) &&
+        data.note is string && data.note.size() <= 400 &&
+        isValidId(data.updatedByUid) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidDateTimeStr(val) {
+      return val is string && (
+        val == '' ||
+        (val.size() == 16 && val.matches('^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]$'))
+      );
+    }
+
+    function isValidDistrictDeadlines(data) {
+      return data.keys().hasAll([
+          'year', 'parteMensualMonth', 'parteMensualDeadline',
+          'movimientosMonth', 'movimientosDeadline', 'annualDeadline',
+          'updatedByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'year', 'parteMensualMonth', 'parteMensualDeadline',
+          'movimientosMonth', 'movimientosDeadline', 'annualDeadline',
+          'parteMensualByMonth', 'movimientosByMonth',
+          'updatedByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.year is int && data.year >= 2020 && data.year <= 2100 &&
+        data.parteMensualMonth is int && data.parteMensualMonth >= 1 && data.parteMensualMonth <= 12 &&
+        isValidDateTimeStr(data.parteMensualDeadline) &&
+        data.movimientosMonth is int && data.movimientosMonth >= 1 && data.movimientosMonth <= 12 &&
+        isValidDateTimeStr(data.movimientosDeadline) &&
+        isValidDateTimeStr(data.annualDeadline) &&
+        (!('parteMensualByMonth' in data) || (
+          data.parteMensualByMonth is map && data.parteMensualByMonth.size() <= 12
+        )) &&
+        (!('movimientosByMonth' in data) || (
+          data.movimientosByMonth is map && data.movimientosByMonth.size() <= 12
+        )) &&
+        isValidId(data.updatedByUid) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidSchoolContact(data) {
+      return data.keys().hasAll([
+          'schoolId', 'directorPhone', 'updatedByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'schoolId', 'directorPhone', 'updatedByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.schoolId) &&
+        data.directorPhone is string && data.directorPhone.size() <= 30 &&
+        isValidId(data.updatedByUid) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // 4. Collection Rules
+
+    // Admins registry
+    match /admins/{uid} {
+      allow get: if isValidId(uid) && isSignedIn() && (request.auth.uid == uid || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isValidId(uid) && isAdmin() && isValidAdminUser(incoming()) &&
+        incoming().uid == uid && incoming().createdAt == request.time;
+      allow update: if isValidId(uid) && isAdmin() && isValidAdminUser(incoming()) &&
+        incoming().uid == existing().uid && incoming().createdAt == existing().createdAt;
+      allow delete: if isValidId(uid) && isAdmin() && uid != request.auth.uid;
+    }
+
+    // Schools directory (No sensitive PII stored here)
+    match /schools/{schoolId} {
+      allow get: if isValidId(schoolId) && isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isValidId(schoolId) && isValidSchool(incoming()) &&
+        incoming().createdAt == request.time && incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            isCompletingProvisionedOnboarding(incoming().saceCode) &&
+            incoming().directorUid == request.auth.uid &&
+            incoming().active == true
+          )
+        );
+      allow update: if isValidId(schoolId) && isValidSchool(incoming()) &&
+        incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            (
+              isCompletingProvisionedOnboarding(existing().saceCode) ||
+              (isUserInProvisionedOnboarding() && getUserData().schoolId == schoolId)
+            ) &&
+            incoming().saceCode == existing().saceCode &&
+            incoming().active == existing().active &&
+            incoming().directorUid == request.auth.uid
+          )
+        );
+      allow delete: if isValidId(schoolId) && isAdmin();
+    }
+
+    // PII-isolated school director phone contact (Admin + owning director only)
+    match /schoolContacts/{schoolId} {
+      allow get: if isValidId(schoolId) && (
+        isAdmin() ||
+        isDirectorOfSchool(schoolId) ||
+        (
+          isUserInProvisionedOnboarding() &&
+          (
+            getUserData().schoolId == schoolId ||
+            (
+              exists(/databases/$(database)/documents/schools/$(schoolId)) &&
+              getUserData().saceCode.lower() == get(/databases/$(database)/documents/schools/$(schoolId)).data.saceCode.lower()
+            )
+          )
+        )
+      );
+      allow list: if isAdmin();
+      allow create: if isValidId(schoolId) &&
+        (
+          isAdmin() ||
+          isDirectorOfSchool(schoolId) ||
+          (
+            isUserInProvisionedOnboarding() &&
+            getAfter(/databases/$(database)/documents/schools/$(schoolId)).data.directorUid == request.auth.uid
+          )
+        ) &&
+        isValidSchoolContact(incoming()) &&
+        incoming().schoolId == schoolId &&
+        existsAfter(/databases/$(database)/documents/schools/$(schoolId)) &&
+        incoming().updatedByUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(schoolId) &&
+        (
+          isAdmin() ||
+          isDirectorOfSchool(schoolId) ||
+          (
+            isUserInProvisionedOnboarding() &&
+            getAfter(/databases/$(database)/documents/schools/$(schoolId)).data.directorUid == request.auth.uid
+          )
+        ) &&
+        isValidSchoolContact(incoming()) &&
+        incoming().schoolId == existing().schoolId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedByUid == request.auth.uid &&
+        incoming().updatedAt == request.time;
+      allow delete: if isValidId(schoolId) && isAdmin();
+    }
+
+    // User profiles (PII protected: owner or admin only; creation strictly admin-only)
+    match /users/{uid} {
+      allow get: if isValidId(uid) && isSignedIn() && (request.auth.uid == uid || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isValidId(uid) && isActiveAuthUser() &&
+        isAdmin() &&
+        isValidUserProfile(incoming()) &&
+        incoming().uid == uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(uid) && isActiveAuthUser() &&
+        isValidUserProfile(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().email == existing().email &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            request.auth.uid == uid &&
+            incoming().role == existing().role &&
+            incoming().schoolId == existing().schoolId &&
+            incoming().schoolName == existing().schoolName &&
+            incoming().saceCode == existing().saceCode &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'dni', 'updatedAt'])
+          ) ||
+          (
+            request.auth.uid == uid &&
+            ('needsOnboarding' in existing()) &&
+            existing().needsOnboarding == true &&
+            existing().saceCode is string &&
+            existing().saceCode.size() >= 1 &&
+            incoming().needsOnboarding == false &&
+            incoming().role == 'director' &&
+            incoming().saceCode == existing().saceCode &&
+            isValidId(incoming().schoolId) &&
+            incoming().schoolName.size() >= 2 &&
+            incoming().displayName.size() >= 2 &&
+            incoming().dni.size() >= 3 &&
+            existsAfter(/databases/$(database)/documents/schools/$(incoming().schoolId)) &&
+            getAfter(/databases/$(database)/documents/schools/$(incoming().schoolId)).data.directorUid == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'displayName', 'dni', 'role', 'needsOnboarding', 'schoolId', 'schoolName', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(uid) && isAdmin();
+    }
+
+    // Director onboarding requests (legacy admin read/review only; self-registration disabled)
+    match /directorRequests/{uid} {
+      allow get: if isValidId(uid) && isSignedIn() && (request.auth.uid == uid || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isValidId(uid) && isAdmin() && isValidDirectorRequest(incoming()) &&
+        incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isValidId(uid) && isAdmin() && isValidDirectorRequest(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().email == existing().email &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time;
+      allow delete: if isValidId(uid) && isAdmin();
+    }
+
+    // Monthly SACE movement reports
+    match /monthlyReports/{reportId} {
+      allow get: if isValidId(reportId) && isSignedIn() && (
+        isAdmin() ||
+        (resource != null && (
+          existing().directorUid == request.auth.uid ||
+          isDirectorOfSchool(existing().schoolId)
+        )) ||
+        (resource == null && isActiveAuthUser() &&
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          getUserData().role == 'director' &&
+          isValidId(getUserData().schoolId) &&
+          reportId.matches('^[0-9]{4}_(0[1-9]|1[0-2])_' + getUserData().schoolId + '_(prebasica|basica|media)$')
+        )
+      );
+      allow list: if isAdmin() || (
+        isSignedIn() && resource.data.directorUid == request.auth.uid
+      );
+      allow create: if isValidId(reportId) && isActiveAuthUser() &&
+        isValidMonthlyReport(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            incoming().directorUid == request.auth.uid &&
+            incoming().status in ['draft', 'submitted'] &&
+            incoming().reviewComment == '' &&
+            incoming().reviewedByUid == '' &&
+            isDirectorOfSchool(incoming().schoolId)
+          )
+        );
+      allow update: if isValidId(reportId) && isActiveAuthUser() &&
+        isValidMonthlyReport(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().year == existing().year &&
+        incoming().month == existing().month &&
+        incoming().schoolId == existing().schoolId &&
+        incoming().level == existing().level &&
+        (
+          isAdmin() ||
+          (
+            (existing().directorUid == request.auth.uid || isDirectorOfSchool(existing().schoolId)) &&
+            incoming().directorUid == existing().directorUid &&
+            existing().status in ['draft', 'returned'] &&
+            incoming().status in ['draft', 'submitted'] &&
+            incoming().reviewComment == existing().reviewComment &&
+            incoming().reviewedByUid == existing().reviewedByUid &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'schoolName', 'saceCode', 'directorName',
+              'ingresos', 'traslados', 'desertores', 'noMovements', 'status', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(reportId) && isAdmin();
+    }
+
+    // Annual statistical reports
+    match /annualReports/{reportId} {
+      allow get: if isValidId(reportId) && isSignedIn() && (
+        isAdmin() ||
+        (resource != null && (
+          existing().directorUid == request.auth.uid ||
+          isDirectorOfSchool(existing().schoolId)
+        )) ||
+        (resource == null && isActiveAuthUser() &&
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          getUserData().role == 'director' &&
+          isValidId(getUserData().schoolId) &&
+          reportId.matches('^[0-9]{4}_' + getUserData().schoolId + '_(prebasica|basica|media)$')
+        )
+      );
+      allow list: if isAdmin() || (
+        isSignedIn() && resource.data.directorUid == request.auth.uid
+      );
+      allow create: if isValidId(reportId) && isActiveAuthUser() &&
+        isValidAnnualReport(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            incoming().directorUid == request.auth.uid &&
+            incoming().status in ['draft', 'submitted'] &&
+            incoming().reviewComment == '' &&
+            incoming().reviewedByUid == '' &&
+            isDirectorOfSchool(incoming().schoolId)
+          )
+        );
+      allow update: if isValidId(reportId) && isActiveAuthUser() &&
+        isValidAnnualReport(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().year == existing().year &&
+        incoming().schoolId == existing().schoolId &&
+        incoming().level == existing().level &&
+        (
+          isAdmin() ||
+          (
+            (existing().directorUid == request.auth.uid || isDirectorOfSchool(existing().schoolId)) &&
+            incoming().directorUid == existing().directorUid &&
+            existing().status in ['draft', 'returned'] &&
+            incoming().status in ['draft', 'submitted'] &&
+            incoming().reviewComment == existing().reviewComment &&
+            incoming().reviewedByUid == existing().reviewedByUid &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'schoolName', 'saceCode', 'community', 'sector', 'modality',
+              'directorName', 'directorDni', 'placeAndDate', 'data', 'status', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(reportId) && isAdmin();
+    }
+
+    // Parte Mensual statistical & attendance reports
+    match /parteMensualReports/{reportId} {
+      allow get: if isValidId(reportId) && isSignedIn() && (
+        isAdmin() ||
+        (resource != null && (
+          existing().directorUid == request.auth.uid ||
+          isDirectorOfSchool(existing().schoolId)
+        )) ||
+        (resource == null && isActiveAuthUser() &&
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          getUserData().role == 'director' &&
+          isValidId(getUserData().schoolId) &&
+          reportId.matches('^[0-9]{4}_(0[1-9]|1[0-2])_' + getUserData().schoolId + '_(prebasica|basica|media)$')
+        )
+      );
+      allow list: if isAdmin() || (
+        isSignedIn() && resource.data.directorUid == request.auth.uid
+      );
+      allow create: if isValidId(reportId) && isActiveAuthUser() &&
+        isValidParteMensualReport(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            incoming().directorUid == request.auth.uid &&
+            incoming().status in ['draft', 'submitted'] &&
+            incoming().reviewComment == '' &&
+            incoming().reviewedByUid == '' &&
+            isDirectorOfSchool(incoming().schoolId)
+          )
+        );
+      allow update: if isValidId(reportId) && isActiveAuthUser() &&
+        isValidParteMensualReport(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().year == existing().year &&
+        incoming().month == existing().month &&
+        incoming().schoolId == existing().schoolId &&
+        incoming().level == existing().level &&
+        (
+          isAdmin() ||
+          (
+            (existing().directorUid == request.auth.uid || isDirectorOfSchool(existing().schoolId)) &&
+            incoming().directorUid == existing().directorUid &&
+            existing().status in ['draft', 'returned'] &&
+            incoming().status in ['draft', 'submitted'] &&
+            incoming().reviewComment == existing().reviewComment &&
+            incoming().reviewedByUid == existing().reviewedByUid &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'schoolName', 'saceCode', 'lugar', 'directorName',
+              'diasTrabajados', 'rows', 'status', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(reportId) && isAdmin();
+    }
+
+    // District activities (created by admins, read by assigned directors)
+    match /activities/{activityId} {
+      allow get: if isValidId(activityId) && isSignedIn() && (
+        isAdmin() ||
+        (resource != null && (
+          request.auth.uid in existing().assignedDirectorUids ||
+          (
+            isActiveAuthUser() &&
+            exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+            getUserData().role == 'director' &&
+            getUserData().schoolId in existing().targetSchoolIds
+          )
+        ))
+      );
+      allow list: if isAdmin() || (
+        isActiveAuthUser() && request.auth.uid in resource.data.assignedDirectorUids
+      );
+      allow create: if isValidId(activityId) && isAdmin() &&
+        isValidDistrictActivity(incoming()) &&
+        incoming().createdByUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(activityId) && isAdmin() &&
+        isValidDistrictActivity(incoming()) &&
+        incoming().createdByUid == existing().createdByUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time;
+      allow delete: if isValidId(activityId) && isAdmin();
+    }
+
+    // Activity compliance records (admin marks WhatsApp evidence compliance, director reads own school)
+    match /activityCompliances/{complianceId} {
+      allow get: if isValidId(complianceId) && isSignedIn() && (
+        isAdmin() ||
+        (resource != null && (
+          existing().directorUid == request.auth.uid ||
+          isDirectorOfSchool(existing().schoolId)
+        ))
+      );
+      allow list: if isAdmin() || (
+        isActiveAuthUser() && resource.data.directorUid == request.auth.uid
+      );
+      allow create: if isValidId(complianceId) && isAdmin() &&
+        isValidActivityCompliance(incoming()) &&
+        exists(/databases/$(database)/documents/activities/$(incoming().activityId)) &&
+        exists(/databases/$(database)/documents/schools/$(incoming().schoolId)) &&
+        incoming().updatedByUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(complianceId) && isAdmin() &&
+        isValidActivityCompliance(incoming()) &&
+        incoming().activityId == existing().activityId &&
+        incoming().schoolId == existing().schoolId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedByUid == request.auth.uid &&
+        incoming().updatedAt == request.time;
+      allow delete: if isValidId(complianceId) && isAdmin();
+    }
+
+    // District statistical deadline configuration (non-PII calendar cutoffs)
+    match /districtConfig/{configId} {
+      allow get: if isValidId(configId) && isSignedIn();
+      allow list: if isAdmin();
+      allow create: if isValidId(configId) && isAdmin() &&
+        isValidDistrictDeadlines(incoming()) &&
+        incoming().updatedByUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(configId) && isAdmin() &&
+        isValidDistrictDeadlines(incoming()) &&
+        incoming().year == existing().year &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedByUid == request.auth.uid &&
+        incoming().updatedAt == request.time;
+      allow delete: if isValidId(configId) && isAdmin();
+    }
+  }
+}

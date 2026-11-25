@@ -1,0 +1,8 @@
+{
+  "name": "SACE Distrito 18-B Omoa",
+  "description": "Sistema de registro, validación y consolidación de cuadros estadísticos escolares del Distrito Educativo N° 18-B, Omoa (Prebásica, Básica y Media).",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
