@@ -56,7 +56,6 @@ import {
   totalFM,
   totalIBAE,
   totalNV,
-  validateBasicaData,
   type ParteMensualAnnualSummary,
 } from '../utils/saceCalculations';
 import { fetchAnnualSummaryFromParteMensual } from '../services/parteMensualSyncService';
@@ -260,11 +259,6 @@ export function BasicaAnnualEditor({
       setSyncingPm(false);
     }
   };
-
-  const validationAlerts = useMemo(
-    () => validateBasicaData(data, effectiveScope),
-    [data, effectiveScope]
-  );
 
   const handleSyncEnrollmentToEval = () => {
     setData((prev) => {
@@ -562,27 +556,6 @@ export function BasicaAnnualEditor({
           }`}
         >
           {feedback.text}
-        </div>
-      )}
-
-      {validationAlerts.length > 0 && (
-        <div className="p-4 bg-amber-50/90 border border-amber-200 space-y-1.5">
-          <div className="flex items-center gap-2 text-xs font-semibold text-amber-900">
-            <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />
-            <span>
-              Alertas de validación matemática ({validationAlerts.length})
-            </span>
-          </div>
-          <ul className="list-disc pl-5 space-y-0.5 text-xs text-amber-800">
-            {validationAlerts.slice(0, 6).map((a, idx) => (
-              <li key={idx}>
-                <strong>{a.section}:</strong> {a.message}
-              </li>
-            ))}
-            {validationAlerts.length > 6 && (
-              <li>...y {validationAlerts.length - 6} alertas adicionales por revisar.</li>
-            )}
-          </ul>
         </div>
       )}
 

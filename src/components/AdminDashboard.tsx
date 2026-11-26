@@ -1125,41 +1125,6 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
             onOpenCompliance={() => onSectionChange?.('activities')}
           />
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-white border border-slate-200 p-5 space-y-1">
-              <p className="text-xs text-slate-500">Centros Educativos</p>
-              <p className="font-mono text-2xl font-bold text-slate-900 tabular-nums">
-                {schools.length}
-              </p>
-              <p className="text-xs text-slate-500">
-                {pendingRequests.length} directores por aprobar
-              </p>
-            </div>
-            <div className="bg-white border border-slate-200 p-5 space-y-1">
-              <p className="text-xs text-slate-500">Matrícula Final Prebásica</p>
-              <p className="font-mono text-2xl font-bold text-slate-900 tabular-nums">
-                {districtTotals.prebasica}
-              </p>
-              <p className="text-xs text-slate-500">Año {year}</p>
-            </div>
-            <div className="bg-white border border-slate-200 p-5 space-y-1">
-              <p className="text-xs text-slate-500">Matrícula Final Básica</p>
-              <p className="font-mono text-2xl font-bold text-slate-900 tabular-nums">
-                {districtTotals.basica}
-              </p>
-              <p className="text-xs text-slate-500 font-mono tabular-nums">
-                I-II (1°-6°): {districtTotals.basicaC12} · III (7°-9°): {districtTotals.basicaC3}
-              </p>
-            </div>
-            <div className="bg-white border border-slate-200 p-5 space-y-1">
-              <p className="text-xs text-slate-500">Matrícula Final Media</p>
-              <p className="font-mono text-2xl font-bold text-slate-900 tabular-nums">
-                {districtTotals.media}
-              </p>
-              <p className="text-xs text-slate-500">10° a 12° Grado</p>
-            </div>
-          </div>
-
           <DistrictDeadlinesSection
             year={year}
             adminUid={profile.uid}
@@ -1259,6 +1224,41 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                   )}
                 </tbody>
               </table>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white border border-slate-200 p-5 space-y-1">
+              <p className="text-xs text-slate-500">Centros Educativos</p>
+              <p className="font-mono text-2xl font-bold text-slate-900 tabular-nums">
+                {schools.length}
+              </p>
+              <p className="text-xs text-slate-500">
+                {pendingRequests.length} directores por aprobar
+              </p>
+            </div>
+            <div className="bg-white border border-slate-200 p-5 space-y-1">
+              <p className="text-xs text-slate-500">Matrícula Final Prebásica</p>
+              <p className="font-mono text-2xl font-bold text-slate-900 tabular-nums">
+                {districtTotals.prebasica}
+              </p>
+              <p className="text-xs text-slate-500">Año {year}</p>
+            </div>
+            <div className="bg-white border border-slate-200 p-5 space-y-1">
+              <p className="text-xs text-slate-500">Matrícula Final Básica</p>
+              <p className="font-mono text-2xl font-bold text-slate-900 tabular-nums">
+                {districtTotals.basica}
+              </p>
+              <p className="text-xs text-slate-500 font-mono tabular-nums">
+                I-II (1°-6°): {districtTotals.basicaC12} · III (7°-9°): {districtTotals.basicaC3}
+              </p>
+            </div>
+            <div className="bg-white border border-slate-200 p-5 space-y-1">
+              <p className="text-xs text-slate-500">Matrícula Final Media</p>
+              <p className="font-mono text-2xl font-bold text-slate-900 tabular-nums">
+                {districtTotals.media}
+              </p>
+              <p className="text-xs text-slate-500">10° a 12° Grado</p>
             </div>
           </div>
         </div>

@@ -43,7 +43,6 @@ import {
   totalANA,
   totalIBAE,
   totalNV,
-  validateMediaData,
   type ParteMensualAnnualSummary,
 } from '../utils/saceCalculations';
 import { fetchAnnualSummaryFromParteMensual } from '../services/parteMensualSyncService';
@@ -222,8 +221,6 @@ export function MediaAnnualEditor({
       setSyncingPm(false);
     }
   };
-
-  const validationAlerts = useMemo(() => validateMediaData(data), [data]);
 
   const handleSyncEnrollmentToEval = () => {
     setData((prev) => {
@@ -501,22 +498,6 @@ export function MediaAnnualEditor({
           }`}
         >
           {feedback.text}
-        </div>
-      )}
-
-      {validationAlerts.length > 0 && (
-        <div className="p-4 bg-amber-50/90 border border-amber-200 space-y-1.5">
-          <div className="flex items-center gap-2 text-xs font-semibold text-amber-900">
-            <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />
-            <span>Alertas de validación matemática ({validationAlerts.length})</span>
-          </div>
-          <ul className="list-disc pl-5 space-y-0.5 text-xs text-amber-800">
-            {validationAlerts.slice(0, 6).map((a, idx) => (
-              <li key={idx}>
-                <strong>{a.section}:</strong> {a.message}
-              </li>
-            ))}
-          </ul>
         </div>
       )}
 
