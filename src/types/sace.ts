@@ -219,8 +219,11 @@ export interface EvaluacionFinalRow {
 // Prebásica
 export type PrebasicaGradeKey = 'prekinder' | 'kinder' | 'preparatoria';
 
+export type PrebasicaAgeKey = 'a3' | 'a4' | 'a5' | 'a6' | 'a7';
+
 export interface PrebasicaAnnualData {
   estadisticoFinal: Record<PrebasicaGradeKey, EstadisticoRow>;
+  matriculaEdades: Record<PrebasicaGradeKey, Record<PrebasicaAgeKey, NVCount>>;
 }
 
 // Básica

@@ -31,6 +31,7 @@ import type {
   ParteMensualComputedRow,
   ParteMensualReport,
   ParteMensualRow,
+  PrebasicaAgeKey,
   PrebasicaAnnualData,
   PrebasicaCenterType,
   PrebasicaGradeKey,
@@ -253,10 +254,23 @@ export const STATUS_LABELS: Record<ReportStatus, string> = {
   returned: 'Devuelto con observaciones',
 };
 
-export const PREBASICA_GRADES: { key: PrebasicaGradeKey; label: string }[] = [
-  { key: 'prekinder', label: 'Pre-kínder (1°)' },
-  { key: 'kinder', label: 'Kínder (2°)' },
-  { key: 'preparatoria', label: 'Preparatoria (3°)' },
+export const PREBASICA_GRADES: {
+  key: PrebasicaGradeKey;
+  shortLabel: string;
+  edadesLabel: string;
+  label: string;
+}[] = [
+  { key: 'prekinder', shortLabel: '1°', edadesLabel: 'PRIMERO', label: 'Pre-kínder (1°)' },
+  { key: 'kinder', shortLabel: '2°', edadesLabel: 'SEGUNDO', label: 'Kínder (2°)' },
+  { key: 'preparatoria', shortLabel: '3°', edadesLabel: 'TERCERO', label: 'Preparatoria (3°)' },
+];
+
+export const PREBASICA_AGES: { key: PrebasicaAgeKey; label: string }[] = [
+  { key: 'a3', label: '3 años' },
+  { key: 'a4', label: '4 años' },
+  { key: 'a5', label: '5 años' },
+  { key: 'a6', label: '6 años' },
+  { key: 'a7', label: '7 años' },
 ];
 
 export const BASICA_CYCLE_1_2: { key: BasicaGradeKey; shortLabel: string; label: string }[] = [
@@ -438,13 +452,43 @@ export const emptyEvaluacionFinalRow = (): EvaluacionFinalRow => ({
 });
 
 export function createEmptyPrebasicaData(): PrebasicaAnnualData {
+  const estadisticoFinal = {} as Record<PrebasicaGradeKey, EstadisticoRow>;
+  const matriculaEdades = {} as Record<PrebasicaGradeKey, Record<PrebasicaAgeKey, NVCount>>;
+  for (const g of PREBASICA_GRADES) {
+    estadisticoFinal[g.key] = emptyEstadisticoRow();
+    const ageMap = {} as Record<PrebasicaAgeKey, NVCount>;
+    for (const age of PREBASICA_AGES) {
+      ageMap[age.key] = emptyNV();
+    }
+    matriculaEdades[g.key] = ageMap;
+  }
   return {
-    estadisticoFinal: {
-      prekinder: emptyEstadisticoRow(),
-      kinder: emptyEstadisticoRow(),
-      preparatoria: emptyEstadisticoRow(),
-    },
+    estadisticoFinal,
+    matriculaEdades,
   };
+}
+
+export function normalizePrebasicaData(
+  raw?: Partial<PrebasicaAnnualData> | null
+): PrebasicaAnnualData {
+  const base = createEmptyPrebasicaData();
+  if (!raw) return base;
+  for (const g of PREBASICA_GRADES) {
+    const srcEst = raw.estadisticoFinal?.[g.key];
+    if (srcEst) {
+      base.estadisticoFinal[g.key] = sumEstadisticoRows([srcEst]);
+    }
+    for (const age of PREBASICA_AGES) {
+      const srcAge = raw.matriculaEdades?.[g.key]?.[age.key];
+      if (srcAge) {
+        base.matriculaEdades[g.key][age.key] = {
+          n: srcAge.n || 0,
+          v: srcAge.v || 0,
+        };
+      }
+    }
+  }
+  return base;
 }
 
 export function createEmptyBasicaResumenDenominacion(): Record<
@@ -850,13 +894,19 @@ export function aggregatePrebasicaReports(reports: AnnualReport[]): PrebasicaAnn
   const result = createEmptyPrebasicaData();
   for (const r of reports) {
     if (r.level !== 'prebasica' || !r.data) continue;
-    const d = r.data as PrebasicaAnnualData;
+    const d = r.data as Partial<PrebasicaAnnualData>;
     for (const g of PREBASICA_GRADES) {
       if (d.estadisticoFinal?.[g.key]) {
         result.estadisticoFinal[g.key] = sumEstadisticoRows([
           result.estadisticoFinal[g.key],
           d.estadisticoFinal[g.key],
         ]);
+      }
+      for (const age of PREBASICA_AGES) {
+        result.matriculaEdades[g.key][age.key] = addNV(
+          result.matriculaEdades[g.key][age.key],
+          d.matriculaEdades?.[g.key]?.[age.key]
+        );
       }
     }
   }

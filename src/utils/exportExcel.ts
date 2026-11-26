@@ -28,6 +28,7 @@ import {
   MEDIA_RESUMEN_SUBJECTS,
   MEDIA_UNDECIMO_SUBJECTS,
   MONTHS,
+  PREBASICA_AGES,
   PREBASICA_GRADES,
   addFM,
   addIBAE,
@@ -37,6 +38,7 @@ import {
   emptyNV,
   getBasicaGradesForScope,
   getParteMensualGrades,
+  normalizePrebasicaData,
   sumEstadisticoRows,
   sumEvaluacionFinalRows,
   sumParteMensualComputedRows,
@@ -1210,23 +1212,110 @@ export async function exportMediaExcel(data: MediaAnnualData, meta: ExportMeta) 
   downloadWorkbook(workbook, `Cuadros_Media_${meta.saceCode || 'Distrito_18B'}_${meta.year}.xlsx`);
 }
 
-export async function exportPrebasicaExcel(data: PrebasicaAnnualData, meta: ExportMeta) {
+export async function exportPrebasicaExcel(rawData: PrebasicaAnnualData, meta: ExportMeta) {
+  const data = normalizePrebasicaData(rawData);
   const workbook = new ExcelJS.Workbook();
-  const s1 = workbook.addWorksheet('Estadístico Prebásica', {
+
+  // Sheet 1: Reporte Estadístico Final
+  const s1 = workbook.addWorksheet('1. Estadístico Final', {
     pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 1 },
   });
   populateEstadisticoSheet(s1, `REPORTE ESTADÍSTICO FINAL-SACE PREBÁSICA ${meta.year}`, meta, [
     {
       label: 'Prebásica',
       rows: PREBASICA_GRADES.map((g) => ({
-        label: g.label,
+        label: g.shortLabel,
         data: data.estadisticoFinal[g.key],
       })),
     },
   ]);
+
+  // Sheet 2: Matrícula Final por Edades
+  const s2 = workbook.addWorksheet('2. Matrícula Edades', {
+    pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 1 },
+  });
+  const s2Cols = 1 + (PREBASICA_AGES.length + 1) * 3;
+  addOfficialBanner(s2, s2Cols, `MATRÍCULA FINAL POR EDADES PREBÁSICA ${meta.year}`, meta);
+
+  s2.mergeCells(8, 1, 9, 1);
+  s2.getCell(8, 1).value = 'Grado';
+  styleCell(s2.getCell(8, 1), { bold: true, fill: HEADER_FILL_GREEN });
+  styleCell(s2.getCell(9, 1), { bold: true, fill: HEADER_FILL_GREEN });
+
+  [...PREBASICA_AGES.map((a) => a.label), 'TOTAL'].forEach((lbl, idx) => {
+    const c = 2 + idx * 3;
+    s2.mergeCells(8, c, 8, c + 2);
+    s2.getCell(8, c).value = lbl;
+    styleCell(s2.getCell(8, c), { bold: true, fill: HEADER_FILL_GREEN });
+    styleCell(s2.getCell(8, c + 1), { bold: true, fill: HEADER_FILL_GREEN });
+    styleCell(s2.getCell(8, c + 2), { bold: true, fill: HEADER_FILL_GREEN });
+    ['N', 'V', 'T'].forEach((sub, sIdx) => {
+      s2.getCell(9, c + sIdx).value = sub;
+      styleCell(s2.getCell(9, c + sIdx), { bold: true, fill: SUBHEADER_FILL_BLUE });
+    });
+  });
+
+  let r2 = 10;
+  const colAgeTotals = PREBASICA_AGES.map(() => emptyNV());
+  for (const g of PREBASICA_GRADES) {
+    s2.getCell(r2, 1).value = g.edadesLabel;
+    styleCell(s2.getCell(r2, 1), { align: 'left', bold: true });
+    let rowSum = emptyNV();
+    PREBASICA_AGES.forEach((age, idx) => {
+      const nv = data.matriculaEdades[g.key][age.key] || emptyNV();
+      rowSum = addNV(rowSum, nv);
+      colAgeTotals[idx] = addNV(colAgeTotals[idx], nv);
+      const c = 2 + idx * 3;
+      s2.getCell(r2, c).value = nv.n;
+      s2.getCell(r2, c + 1).value = nv.v;
+      s2.getCell(r2, c + 2).value = totalNV(nv);
+      styleCell(s2.getCell(r2, c), { align: 'right', numFmt: '#,##0' });
+      styleCell(s2.getCell(r2, c + 1), { align: 'right', numFmt: '#,##0' });
+      styleCell(s2.getCell(r2, c + 2), {
+        bold: true,
+        fill: SUBHEADER_FILL_BLUE,
+        align: 'right',
+        numFmt: '#,##0',
+      });
+    });
+    const tc = 2 + PREBASICA_AGES.length * 3;
+    s2.getCell(r2, tc).value = rowSum.n;
+    s2.getCell(r2, tc + 1).value = rowSum.v;
+    s2.getCell(r2, tc + 2).value = totalNV(rowSum);
+    styleCell(s2.getCell(r2, tc), { bold: true, fill: SUBTOTAL_FILL_GRAY, align: 'right', numFmt: '#,##0' });
+    styleCell(s2.getCell(r2, tc + 1), { bold: true, fill: SUBTOTAL_FILL_GRAY, align: 'right', numFmt: '#,##0' });
+    styleCell(s2.getCell(r2, tc + 2), { bold: true, fill: SUBTOTAL_FILL_GRAY, align: 'right', numFmt: '#,##0' });
+    r2++;
+  }
+
+  s2.getCell(r2, 1).value = 'TOTAL';
+  styleCell(s2.getCell(r2, 1), { bold: true, fill: TOTAL_FILL_YELLOW, align: 'left' });
+  let grandAge = emptyNV();
+  colAgeTotals.forEach((nv, idx) => {
+    grandAge = addNV(grandAge, nv);
+    const c = 2 + idx * 3;
+    s2.getCell(r2, c).value = nv.n;
+    s2.getCell(r2, c + 1).value = nv.v;
+    s2.getCell(r2, c + 2).value = totalNV(nv);
+    styleCell(s2.getCell(r2, c), { bold: true, fill: TOTAL_FILL_YELLOW, align: 'right', numFmt: '#,##0' });
+    styleCell(s2.getCell(r2, c + 1), { bold: true, fill: TOTAL_FILL_YELLOW, align: 'right', numFmt: '#,##0' });
+    styleCell(s2.getCell(r2, c + 2), { bold: true, fill: TOTAL_FILL_YELLOW, align: 'right', numFmt: '#,##0' });
+  });
+  const tc2 = 2 + PREBASICA_AGES.length * 3;
+  s2.getCell(r2, tc2).value = grandAge.n;
+  s2.getCell(r2, tc2 + 1).value = grandAge.v;
+  s2.getCell(r2, tc2 + 2).value = totalNV(grandAge);
+  styleCell(s2.getCell(r2, tc2), { bold: true, fill: TOTAL_FILL_YELLOW, align: 'right', numFmt: '#,##0' });
+  styleCell(s2.getCell(r2, tc2 + 1), { bold: true, fill: TOTAL_FILL_YELLOW, align: 'right', numFmt: '#,##0' });
+  styleCell(s2.getCell(r2, tc2 + 2), { bold: true, fill: TOTAL_FILL_YELLOW, align: 'right', numFmt: '#,##0' });
+
+  s2.getColumn(1).width = 18;
+  for (let c = 2; c <= s2Cols; c++) s2.getColumn(c).width = 6.5;
+  addSignatureFooter(s2, r2 + 2, s2Cols, meta);
+
   downloadWorkbook(
     workbook,
-    `Cuadro_Prebasica_${meta.saceCode || 'Distrito_18B'}_${meta.year}.xlsx`
+    `Cuadros_Prebasica_${meta.saceCode || 'Distrito_18B'}_${meta.year}.xlsx`
   );
 }
 

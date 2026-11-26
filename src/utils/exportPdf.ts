@@ -30,6 +30,7 @@ import {
   MEDIA_RESUMEN_SUBJECTS,
   MEDIA_UNDECIMO_SUBJECTS,
   MONTHS,
+  PREBASICA_AGES,
   PREBASICA_GRADES,
   addFM,
   addIBAE,
@@ -39,6 +40,7 @@ import {
   emptyNV,
   getBasicaGradesForScope,
   getParteMensualGrades,
+  normalizePrebasicaData,
   sumEstadisticoRows,
   sumEvaluacionFinalRows,
   sumParteMensualComputedRows,
@@ -802,16 +804,97 @@ export function exportMediaPdf(data: MediaAnnualData, meta: ExportMeta) {
   doc.save(`Cuadros_Media_${meta.saceCode || 'Distrito_18B'}_${meta.year}.pdf`);
 }
 
-export function exportPrebasicaPdf(data: PrebasicaAnnualData, meta: ExportMeta) {
+export function exportPrebasicaPdf(rawData: PrebasicaAnnualData, meta: ExportMeta) {
+  const data = normalizePrebasicaData(rawData);
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'letter' });
-  const y = drawHeader(doc, `REPORTE ESTADÍSTICO FINAL-SACE PREBÁSICA ${meta.year}`, meta);
+
+  // Page 1: Reporte Estadístico Final
+  let y = drawHeader(doc, `REPORTE ESTADÍSTICO FINAL-SACE PREBÁSICA ${meta.year}`, meta);
   buildEstadisticoPdfTable(doc, y, [
     {
-      rows: PREBASICA_GRADES.map((g) => ({ label: g.label, data: data.estadisticoFinal[g.key] })),
+      rows: PREBASICA_GRADES.map((g) => ({
+        label: g.shortLabel,
+        data: data.estadisticoFinal[g.key],
+      })),
     },
   ]);
   drawSignatures(doc, (doc as any).lastAutoTable.finalY, meta);
-  doc.save(`Cuadro_Prebasica_${meta.saceCode || 'Distrito_18B'}_${meta.year}.pdf`);
+
+  // Page 2: Matrícula Final por Edades
+  doc.addPage('letter', 'landscape');
+  y = drawHeader(doc, `MATRÍCULA FINAL POR EDADES PREBÁSICA ${meta.year}`, meta);
+  const ageHead1: any[] = [{ content: 'Grado', rowSpan: 2, styles: { valign: 'middle' } }];
+  const ageHead2: any[] = [];
+  [...PREBASICA_AGES.map((a) => a.label), 'TOTAL'].forEach((lbl) => {
+    ageHead1.push({ content: lbl, colSpan: 3, styles: { halign: 'center' } });
+    ageHead2.push('N', 'V', 'T');
+  });
+
+  const ageBody: any[] = [];
+  const colAgeTotals = PREBASICA_AGES.map(() => emptyNV());
+  for (const g of PREBASICA_GRADES) {
+    const rowCells: any[] = [
+      { content: g.edadesLabel, styles: { halign: 'left', fontStyle: 'bold' } },
+    ];
+    let rSum = emptyNV();
+    PREBASICA_AGES.forEach((age, i) => {
+      const nv = data.matriculaEdades[g.key][age.key] || emptyNV();
+      rSum = addNV(rSum, nv);
+      colAgeTotals[i] = addNV(colAgeTotals[i], nv);
+      rowCells.push(nv.n, nv.v, { content: totalNV(nv), styles: { fontStyle: 'bold' } });
+    });
+    rowCells.push(rSum.n, rSum.v, {
+      content: totalNV(rSum),
+      styles: { fontStyle: 'bold', fillColor: [226, 239, 218] },
+    });
+    ageBody.push(rowCells);
+  }
+
+  const ageTotalRow: any[] = [
+    {
+      content: 'TOTAL',
+      styles: { halign: 'left', fontStyle: 'bold', fillColor: [255, 242, 204] },
+    },
+  ];
+  let gAgeSum = emptyNV();
+  colAgeTotals.forEach((nv) => {
+    gAgeSum = addNV(gAgeSum, nv);
+    ageTotalRow.push(
+      { content: nv.n, styles: { fontStyle: 'bold', fillColor: [255, 242, 204] } },
+      { content: nv.v, styles: { fontStyle: 'bold', fillColor: [255, 242, 204] } },
+      { content: totalNV(nv), styles: { fontStyle: 'bold', fillColor: [255, 242, 204] } }
+    );
+  });
+  ageTotalRow.push(
+    { content: gAgeSum.n, styles: { fontStyle: 'bold', fillColor: [255, 242, 204] } },
+    { content: gAgeSum.v, styles: { fontStyle: 'bold', fillColor: [255, 242, 204] } },
+    { content: totalNV(gAgeSum), styles: { fontStyle: 'bold', fillColor: [255, 242, 204] } }
+  );
+  ageBody.push(ageTotalRow);
+
+  autoTable(doc, {
+    startY: y,
+    head: [ageHead1, ageHead2],
+    body: ageBody,
+    theme: 'grid',
+    styles: {
+      fontSize: 7.5,
+      cellPadding: 1.8,
+      halign: 'right',
+      lineColor: [30, 41, 59],
+      lineWidth: 0.2,
+    },
+    headStyles: {
+      fillColor: [217, 234, 211],
+      textColor: [15, 23, 42],
+      fontStyle: 'bold',
+      halign: 'center',
+    },
+    margin: { left: 10, right: 10 },
+  });
+  drawSignatures(doc, (doc as any).lastAutoTable.finalY, meta);
+
+  doc.save(`Cuadros_Prebasica_${meta.saceCode || 'Distrito_18B'}_${meta.year}.pdf`);
 }
 
 export function exportParteMensualPdf(

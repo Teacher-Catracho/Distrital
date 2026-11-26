@@ -6,6 +6,7 @@ import type {
   AnnualReport,
   EstadisticoRow,
   NVCount,
+  PrebasicaAgeKey,
   PrebasicaAnnualData,
   PrebasicaGradeKey,
   ReportStatus,
@@ -13,9 +14,13 @@ import type {
   UserProfile,
 } from '../types/sace';
 import {
+  PREBASICA_AGES,
   PREBASICA_GRADES,
+  addNV,
   createEmptyPrebasicaData,
+  emptyNV,
   mergeParteMensualIntoEstadisticoRow,
+  normalizePrebasicaData,
   sumEstadisticoRows,
   totalNV,
   type ParteMensualAnnualSummary,
@@ -27,11 +32,15 @@ import { NumericCell } from './NumericCell';
 import { ParteMensualSyncBanner } from './ParteMensualSyncBanner';
 import { StatusText } from './StatusText';
 
+type PrebasicaTab = 'estadistico' | 'edades';
+
 interface PrebasicaAnnualEditorProps {
   year: number;
   school: School;
   profile: UserProfile;
   readOnly?: boolean;
+  externalData?: PrebasicaAnnualData;
+  isConsolidated?: boolean;
   onAfterSave?: () => void;
 }
 
@@ -40,10 +49,15 @@ export function PrebasicaAnnualEditor({
   school,
   profile,
   readOnly = false,
+  externalData,
+  isConsolidated = false,
   onAfterSave,
 }: PrebasicaAnnualEditorProps) {
   const reportId = `${year}_${school.id}_prebasica`;
-  const [data, setData] = useState<PrebasicaAnnualData>(() => createEmptyPrebasicaData());
+  const [activeTab, setActiveTab] = useState<PrebasicaTab>('estadistico');
+  const [data, setData] = useState<PrebasicaAnnualData>(() =>
+    normalizePrebasicaData(externalData)
+  );
   const [directorName, setDirectorName] = useState(
     school.directorDisplayName || profile.displayName
   );
@@ -53,7 +67,7 @@ export function PrebasicaAnnualEditor({
   const [placeAndDate, setPlaceAndDate] = useState(`Omoa, Cortés, ${year}`);
   const [status, setStatus] = useState<ReportStatus>('draft');
   const [reviewComment, setReviewComment] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!externalData);
   const [saving, setSaving] = useState(false);
   const [syncingPm, setSyncingPm] = useState(false);
   const [pmSummary, setPmSummary] = useState<ParteMensualAnnualSummary | null>(null);
@@ -75,6 +89,12 @@ export function PrebasicaAnnualEditor({
   };
 
   useEffect(() => {
+    if (externalData) {
+      setPmSummary(null);
+      setData(normalizePrebasicaData(externalData));
+      setLoading(false);
+      return;
+    }
     let active = true;
     async function load() {
       setLoading(true);
@@ -93,7 +113,7 @@ export function PrebasicaAnnualEditor({
           school.directorUid && school.directorUid === profile.uid ? profile.dni || '' : '';
         if (snap.exists()) {
           const r = snap.data() as AnnualReport;
-          baseData = (r.data as PrebasicaAnnualData) || createEmptyPrebasicaData();
+          baseData = normalizePrebasicaData(r.data as Partial<PrebasicaAnnualData>);
           loadedStatus = r.status || 'draft';
           setDirectorName(r.directorName || school.directorDisplayName || profile.displayName);
           setDirectorDni(r.directorDni || defaultDni);
@@ -129,10 +149,23 @@ export function PrebasicaAnnualEditor({
     return () => {
       active = false;
     };
-  }, [reportId, year, school.id, readOnly, profile.role, school.directorUid, school.directorDisplayName, profile.displayName, profile.dni]);
+  }, [
+    reportId,
+    year,
+    school.id,
+    externalData,
+    readOnly,
+    profile.role,
+    school.directorUid,
+    school.directorDisplayName,
+    profile.displayName,
+    profile.dni,
+  ]);
 
   const isLocked =
-    readOnly || (profile.role !== 'admin' && (status === 'approved' || status === 'submitted'));
+    Boolean(externalData) ||
+    readOnly ||
+    (profile.role !== 'admin' && (status === 'approved' || status === 'submitted'));
 
   const handleSyncFromParteMensual = async () => {
     if (isLocked) return;
@@ -184,6 +217,27 @@ export function PrebasicaAnnualEditor({
     }));
   };
 
+  const updateAgeCell = (
+    grade: PrebasicaGradeKey,
+    age: PrebasicaAgeKey,
+    sex: keyof NVCount,
+    val: number
+  ) => {
+    setData((prev) => ({
+      ...prev,
+      matriculaEdades: {
+        ...prev.matriculaEdades,
+        [grade]: {
+          ...prev.matriculaEdades[grade],
+          [age]: {
+            ...prev.matriculaEdades[grade][age],
+            [sex]: val,
+          },
+        },
+      },
+    }));
+  };
+
   const handleSave = async (targetStatus: 'draft' | 'submitted' | 'approved') => {
     setSaving(true);
     setFeedback(null);
@@ -199,6 +253,7 @@ export function PrebasicaAnnualEditor({
         directorName.trim() || school.directorDisplayName || profile.displayName;
       const cleanDirectorDni = directorDni.trim();
       const isAdminActor = profile.role === 'admin';
+      const normalizedPayload = normalizePrebasicaData(data);
 
       if (existing.exists()) {
         const existingData = existing.data() as AnnualReport;
@@ -211,13 +266,16 @@ export function PrebasicaAnnualEditor({
           directorName: cleanDirectorName,
           directorDni: cleanDirectorDni,
           placeAndDate: placeAndDate.trim(),
-          data,
+          data: normalizedPayload,
           status: targetStatus,
           ...(isAdminActor
             ? {
                 directorUid: validSchoolDirectorUid || existingData.directorUid || profile.uid,
                 reviewedByUid: targetStatus === 'approved' ? profile.uid : '',
-                reviewComment: targetStatus === 'approved' || targetStatus === 'submitted' ? '' : existingData.reviewComment || '',
+                reviewComment:
+                  targetStatus === 'approved' || targetStatus === 'submitted'
+                    ? ''
+                    : existingData.reviewComment || '',
               }
             : {}),
           updatedAt: serverTimestamp(),
@@ -236,7 +294,7 @@ export function PrebasicaAnnualEditor({
           directorName: cleanDirectorName,
           directorDni: cleanDirectorDni,
           placeAndDate: placeAndDate.trim(),
-          data,
+          data: normalizedPayload,
           status: targetStatus,
           reviewComment: '',
           reviewedByUid: isAdminActor && targetStatus === 'approved' ? profile.uid : '',
@@ -252,9 +310,9 @@ export function PrebasicaAnnualEditor({
         type: 'ok',
         text:
           targetStatus === 'approved'
-            ? 'Cuadro anual de Prebásica guardado y aprobado oficialmente.'
+            ? 'Cuadros anuales de Prebásica guardados y aprobados oficialmente.'
             : targetStatus === 'submitted'
-            ? 'Cuadro anual de Prebásica enviado al Distrito.'
+            ? 'Cuadros anuales de Prebásica enviados al Distrito.'
             : 'Borrador anual guardado correctamente.',
       });
       onAfterSave?.();
@@ -281,14 +339,22 @@ export function PrebasicaAnnualEditor({
     { key: 'egresados', label: 'Egresados' },
   ];
 
+  const tabs: { key: PrebasicaTab; label: string }[] = [
+    { key: 'estadistico', label: '1. Estadístico Final' },
+    { key: 'edades', label: '2. Matrícula por Edades' },
+  ];
+
   const meta = {
     year,
     schoolName: school.name,
     saceCode: school.saceCode,
     community: school.community,
-    directorName: directorName.trim() || school.directorDisplayName || profile.displayName,
-    directorDni: directorDni.trim(),
+    directorName: isConsolidated
+      ? ''
+      : directorName.trim() || school.directorDisplayName || profile.displayName,
+    directorDni: isConsolidated ? '' : directorDni.trim(),
     placeAndDate,
+    isConsolidated,
   };
 
   return (
@@ -296,15 +362,23 @@ export function PrebasicaAnnualEditor({
       <div className="bg-white border border-slate-200 p-5 flex flex-wrap items-center justify-between gap-4">
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-            <span>Resumen Estadístico Anual</span>
+            <span>Cuadros Estadísticos Anuales</span>
             <span aria-hidden="true">·</span>
             <span>Prebásica {year}</span>
-            <span aria-hidden="true">·</span>
-            <StatusText status={status} />
+            {!externalData && (
+              <>
+                <span aria-hidden="true">·</span>
+                <StatusText status={status} />
+              </>
+            )}
           </div>
           <h2 className="font-display text-lg font-bold text-slate-900">
             {school.name}{' '}
-            <span className="font-mono text-sm font-normal text-slate-500">({school.saceCode})</span>
+            {school.saceCode && (
+              <span className="font-mono text-sm font-normal text-slate-500">
+                ({school.saceCode})
+              </span>
+            )}
           </h2>
         </div>
 
@@ -315,7 +389,7 @@ export function PrebasicaAnnualEditor({
             className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 cursor-pointer whitespace-nowrap"
           >
             <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
-            Excel
+            Excel (2 hojas)
           </button>
           <button
             type="button"
@@ -323,7 +397,7 @@ export function PrebasicaAnnualEditor({
             className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 cursor-pointer whitespace-nowrap"
           >
             <Download className="w-3.5 h-3.5 text-red-700" />
-            PDF
+            PDF Oficial
           </button>
           {!isLocked && (
             <>
@@ -361,7 +435,7 @@ export function PrebasicaAnnualEditor({
         </div>
       </div>
 
-      {status === 'returned' && reviewComment && (
+      {!externalData && status === 'returned' && reviewComment && (
         <div className="p-4 bg-amber-50 border border-amber-200 flex items-start gap-3 text-xs text-amber-900">
           <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
           <div>
@@ -371,7 +445,7 @@ export function PrebasicaAnnualEditor({
         </div>
       )}
 
-      {status === 'approved' && !readOnly && (
+      {!externalData && status === 'approved' && !readOnly && (
         <div className="p-4 bg-emerald-50 border border-emerald-200 flex items-center gap-2 text-xs text-emerald-900">
           <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
           <span>Reporte aprobado por el Distrito.</span>
@@ -390,100 +464,211 @@ export function PrebasicaAnnualEditor({
         </div>
       )}
 
-      <ParteMensualSyncBanner
-        year={year}
-        summary={pmSummary}
-        isLocked={isLocked}
-        syncing={syncingPm}
-        onSync={handleSyncFromParteMensual}
-      />
+      {!externalData && (
+        <ParteMensualSyncBanner
+          year={year}
+          summary={pmSummary}
+          isLocked={isLocked}
+          syncing={syncingPm}
+          onSync={handleSyncFromParteMensual}
+        />
+      )}
 
-      <div className="bg-white border border-slate-200 overflow-x-auto matrix-scroll">
-        <table className="w-full text-xs border-collapse">
-          <thead>
-            <tr className="bg-emerald-50 border-b border-slate-300">
-              <th rowSpan={2} className="px-3 py-2 text-left font-bold border-r border-slate-300 min-w-[140px]">
-                GRADOS
-              </th>
-              {fields.map((f) => (
+      <div className="flex flex-wrap items-center gap-1 bg-slate-100 p-1.5 border border-slate-200">
+        {tabs.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => setActiveTab(t.key)}
+            className={`px-3 py-1.5 text-xs font-medium cursor-pointer whitespace-nowrap shrink-0 transition-colors ${
+              activeTab === t.key
+                ? 'bg-white text-slate-900 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'estadistico' && (
+        <div className="bg-white border border-slate-200 overflow-x-auto matrix-scroll">
+          <table className="w-full text-xs border-collapse">
+            <thead>
+              <tr className="bg-emerald-50 border-b border-slate-300">
                 <th
-                  key={f.key}
-                  colSpan={3}
-                  className="px-2 py-1.5 text-center font-bold border-r border-slate-300"
+                  rowSpan={2}
+                  className="px-3 py-2 text-left font-bold border-r border-slate-300 min-w-[140px]"
                 >
-                  {f.label}
+                  GRADOS
                 </th>
-              ))}
-            </tr>
-            <tr className="bg-blue-50/70 border-b border-slate-300">
-              {fields.map((f) => (
-                <FragmentHeaders key={f.key} />
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-200">
-            {PREBASICA_GRADES.map((g) => {
-              const row = data.estadisticoFinal[g.key];
-              return (
-                <tr key={g.key} className="hover:bg-slate-50/70">
-                  <td className="px-3 py-1.5 font-medium text-slate-900 border-r border-slate-200">
-                    {g.label}
-                  </td>
-                  {fields.map((f) => (
-                    <NVTripleCells
-                      key={f.key}
-                      nv={row[f.key]}
-                      disabled={isLocked}
-                      onChangeN={(v) => updateCell(g.key, f.key, 'n', v)}
-                      onChangeV={(v) => updateCell(g.key, f.key, 'v', v)}
-                    />
-                  ))}
-                </tr>
-              );
-            })}
-            <tr className="bg-amber-50 font-bold border-t-2 border-slate-300">
-              <td className="px-3 py-2 text-slate-900 border-r border-slate-300">TOTAL</td>
-              {fields.map((f) => (
-                <NVTripleCells key={f.key} nv={totalRow[f.key]} disabled highlight />
-              ))}
-            </tr>
-          </tbody>
-        </table>
-      </div>
+                {fields.map((f) => (
+                  <th
+                    key={f.key}
+                    colSpan={3}
+                    className="px-2 py-1.5 text-center font-bold border-r border-slate-300"
+                  >
+                    {f.label}
+                  </th>
+                ))}
+              </tr>
+              <tr className="bg-blue-50/70 border-b border-slate-300">
+                {fields.map((f) => (
+                  <FragmentHeaders key={f.key} />
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200">
+              {PREBASICA_GRADES.map((g) => {
+                const row = data.estadisticoFinal[g.key];
+                return (
+                  <tr key={g.key} className="hover:bg-slate-50/70">
+                    <td className="px-3 py-1.5 font-medium text-slate-900 border-r border-slate-200">
+                      {g.label}
+                    </td>
+                    {fields.map((f) => (
+                      <NVTripleCells
+                        key={f.key}
+                        nv={row[f.key]}
+                        disabled={isLocked}
+                        onChangeN={(v) => updateCell(g.key, f.key, 'n', v)}
+                        onChangeV={(v) => updateCell(g.key, f.key, 'v', v)}
+                      />
+                    ))}
+                  </tr>
+                );
+              })}
+              <tr className="bg-amber-50 font-bold border-t-2 border-slate-300">
+                <td className="px-3 py-2 text-slate-900 border-r border-slate-300">TOTAL</td>
+                {fields.map((f) => (
+                  <NVTripleCells key={f.key} nv={totalRow[f.key]} disabled highlight />
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
 
-      <div className="bg-white border border-slate-200 p-4 grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
-        <div>
-          <label className="block font-medium text-slate-700 mb-1">Director(a) del centro:</label>
-          <input
-            type="text"
-            disabled={isLocked}
-            value={directorName}
-            onChange={(e) => setDirectorName(e.target.value)}
-            className="w-full px-3 py-1.5 border border-slate-300 disabled:bg-slate-50"
-          />
+      {activeTab === 'edades' && (
+        <div className="bg-white border border-slate-200 overflow-x-auto matrix-scroll">
+          <table className="w-full text-xs border-collapse">
+            <thead>
+              <tr className="bg-emerald-50 border-b border-slate-300">
+                <th
+                  rowSpan={2}
+                  className="px-3 py-2 text-left font-bold border-r border-slate-300 sticky left-0 bg-emerald-50 z-10 min-w-[160px]"
+                >
+                  Grado
+                </th>
+                {PREBASICA_AGES.map((age) => (
+                  <th
+                    key={age.key}
+                    colSpan={3}
+                    className="px-2 py-1.5 text-center font-bold border-r border-slate-300 whitespace-nowrap"
+                  >
+                    {age.label}
+                  </th>
+                ))}
+                <th colSpan={3} className="px-2 py-1.5 text-center font-bold bg-amber-50">
+                  TOTAL
+                </th>
+              </tr>
+              <tr className="bg-blue-50/70 border-b border-slate-300">
+                {PREBASICA_AGES.map((age) => (
+                  <FragmentHeaders key={age.key} />
+                ))}
+                <FragmentHeaders />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200">
+              {PREBASICA_GRADES.map((g) => {
+                const rowSum = PREBASICA_AGES.reduce(
+                  (acc, age) => addNV(acc, data.matriculaEdades[g.key][age.key]),
+                  emptyNV()
+                );
+                return (
+                  <tr key={g.key} className="hover:bg-slate-50/70">
+                    <td className="px-3 py-1.5 font-medium text-slate-900 border-r border-slate-200 sticky left-0 bg-white z-10 whitespace-nowrap">
+                      <span>{g.edadesLabel}</span>{' '}
+                      <span className="text-[11px] font-normal text-slate-500">({g.label})</span>
+                    </td>
+                    {PREBASICA_AGES.map((age) => (
+                      <NVTripleCells
+                        key={age.key}
+                        nv={data.matriculaEdades[g.key][age.key]}
+                        disabled={isLocked}
+                        onChangeN={(v) => updateAgeCell(g.key, age.key, 'n', v)}
+                        onChangeV={(v) => updateAgeCell(g.key, age.key, 'v', v)}
+                      />
+                    ))}
+                    <NVTripleCells nv={rowSum} disabled highlight />
+                  </tr>
+                );
+              })}
+              <tr className="bg-amber-50 font-bold border-t-2 border-slate-300">
+                <td className="px-3 py-2 text-slate-900 border-r border-slate-300 sticky left-0 bg-amber-50 z-10">
+                  TOTAL
+                </td>
+                {PREBASICA_AGES.map((age) => {
+                  const colSum = PREBASICA_GRADES.reduce(
+                    (acc, g) => addNV(acc, data.matriculaEdades[g.key][age.key]),
+                    emptyNV()
+                  );
+                  return <NVTripleCells key={age.key} nv={colSum} disabled highlight />;
+                })}
+                <NVTripleCells
+                  nv={PREBASICA_GRADES.reduce(
+                    (acc, g) =>
+                      PREBASICA_AGES.reduce(
+                        (inner, age) => addNV(inner, data.matriculaEdades[g.key][age.key]),
+                        acc
+                      ),
+                    emptyNV()
+                  )}
+                  disabled
+                  highlight
+                />
+              </tr>
+            </tbody>
+          </table>
         </div>
-        <div>
-          <label className="block font-medium text-slate-700 mb-1">DNI Director(a):</label>
-          <input
-            type="text"
-            disabled={isLocked}
-            value={directorDni}
-            onChange={(e) => setDirectorDni(e.target.value)}
-            className="w-full px-3 py-1.5 font-mono border border-slate-300 disabled:bg-slate-50"
-            placeholder="0503198000000"
-          />
+      )}
+
+      {!isConsolidated && (
+        <div className="bg-white border border-slate-200 p-4 grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+          <div>
+            <label className="block font-medium text-slate-700 mb-1">Director(a) del centro:</label>
+            <input
+              type="text"
+              disabled={isLocked}
+              value={directorName}
+              onChange={(e) => setDirectorName(e.target.value)}
+              className="w-full px-3 py-1.5 border border-slate-300 disabled:bg-slate-50"
+            />
+          </div>
+          <div>
+            <label className="block font-medium text-slate-700 mb-1">DNI Director(a):</label>
+            <input
+              type="text"
+              disabled={isLocked}
+              value={directorDni}
+              onChange={(e) => setDirectorDni(e.target.value)}
+              className="w-full px-3 py-1.5 font-mono border border-slate-300 disabled:bg-slate-50"
+              placeholder="0503198000000"
+            />
+          </div>
+          <div>
+            <label className="block font-medium text-slate-700 mb-1">Lugar y fecha del reporte:</label>
+            <input
+              type="text"
+              disabled={isLocked}
+              value={placeAndDate}
+              onChange={(e) => setPlaceAndDate(e.target.value)}
+              className="w-full px-3 py-1.5 border border-slate-300 disabled:bg-slate-50"
+            />
+          </div>
         </div>
-        <div>
-          <label className="block font-medium text-slate-700 mb-1">Lugar y fecha del reporte:</label>
-          <input
-            type="text"
-            disabled={isLocked}
-            value={placeAndDate}
-            onChange={(e) => setPlaceAndDate(e.target.value)}
-            className="w-full px-3 py-1.5 border border-slate-300 disabled:bg-slate-50"
-          />
-        </div>
-      </div>
+      )}
     </div>
   );
 }

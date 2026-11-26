@@ -88,13 +88,11 @@ import {
   exportBasicaExcel,
   exportMediaExcel,
   exportMonthlyReportExcel,
-  exportPrebasicaExcel,
 } from '../utils/exportExcel';
 import {
   exportBasicaPdf,
   exportMediaPdf,
   exportMonthlyReportPdf,
-  exportPrebasicaPdf,
 } from '../utils/exportPdf';
 import { ActivityComplianceAdmin } from './ActivityComplianceAdmin';
 import { ActivityComplianceChart } from './ActivityComplianceChart';
@@ -2758,45 +2756,14 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                 externalData={consolidatedMediaData}
               />
             ) : (
-              <div className="bg-white border border-slate-200 p-5 flex items-center justify-between gap-4">
-                <div className="text-xs text-slate-700">
-                  Consolidado Prebásica ({consolidatedAnnualSubset.length} centros incluidos).
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      exportPrebasicaExcel(consolidatedPrebasicaData, {
-                        year,
-                        schoolName: consSchoolObj.name,
-                        saceCode: consSchoolObj.saceCode,
-                        community: 'Omoa, Cortés',
-                        isConsolidated: consSchoolId === 'all',
-                      })
-                    }
-                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium border border-slate-300 bg-white hover:bg-slate-50 cursor-pointer"
-                  >
-                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
-                    Excel Consolidado
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      exportPrebasicaPdf(consolidatedPrebasicaData, {
-                        year,
-                        schoolName: consSchoolObj.name,
-                        saceCode: consSchoolObj.saceCode,
-                        community: 'Omoa, Cortés',
-                        isConsolidated: consSchoolId === 'all',
-                      })
-                    }
-                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium border border-slate-300 bg-white hover:bg-slate-50 cursor-pointer"
-                  >
-                    <Download className="w-3.5 h-3.5 text-red-700" />
-                    PDF Consolidado
-                  </button>
-                </div>
-              </div>
+              <PrebasicaAnnualEditor
+                year={year}
+                school={consSchoolObj}
+                profile={profile}
+                readOnly
+                isConsolidated={consSchoolId === 'all'}
+                externalData={consolidatedPrebasicaData}
+              />
             )
           ) : (
             <div className="bg-white border border-slate-200 p-5 space-y-4">
