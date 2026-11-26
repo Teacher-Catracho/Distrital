@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  AlertTriangle,
   CalendarClock,
   CheckCircle2,
   Download,
@@ -9,6 +10,7 @@ import {
   Plus,
   RotateCcw,
   Search,
+  Trash2,
   UserCheck,
   X,
   XCircle,
@@ -182,6 +184,12 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
   const [editBasicaType, setEditBasicaType] = useState<CanonicalBasicaCenterType>('normal');
   const [editSector, setEditSector] = useState<SectorType>('gubernamental');
   const [editModality, setEditModality] = useState<ModalityType>('presencial');
+  const [deletingSchool, setDeletingSchool] = useState<School | null>(null);
+  const [deleteSchoolReportsToo, setDeleteSchoolReportsToo] = useState(false);
+  const [schoolCatalogBanner, setSchoolCatalogBanner] = useState<{
+    type: 'ok' | 'err';
+    text: string;
+  } | null>(null);
 
   // Review filters & modal
   const [rejectingUid, setRejectingUid] = useState<string | null>(null);
@@ -487,6 +495,90 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
       setEditingSchoolId(null);
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `schools/${editingSchoolId}`);
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleConfirmDeleteSchool = async () => {
+    if (!deletingSchool) return;
+    const target = deletingSchool;
+    setActionBusy(true);
+    setSchoolCatalogBanner(null);
+    try {
+      type BatchOp = (batch: ReturnType<typeof writeBatch>) => void;
+      const ops: BatchOp[] = [];
+
+      ops.push((b) => b.delete(doc(db, 'schools', target.id)));
+      ops.push((b) => b.delete(doc(db, 'schoolContacts', target.id)));
+
+      const linkedUsers = users.filter((u) => u.schoolId === target.id);
+      for (const u of linkedUsers) {
+        ops.push((b) =>
+          b.update(doc(db, 'users', u.uid), {
+            schoolId: '',
+            schoolName: '',
+            ...(u.role === 'director'
+              ? {
+                  role: 'pending',
+                  needsOnboarding: Boolean(u.saceCode),
+                }
+              : {}),
+            updatedAt: serverTimestamp(),
+          })
+        );
+      }
+
+      if (deleteSchoolReportsToo) {
+        for (const r of annualReports) {
+          if (r.schoolId === target.id) {
+            ops.push((b) => b.delete(doc(db, 'annualReports', r.id)));
+          }
+        }
+        for (const r of parteMensualReports) {
+          if (r.schoolId === target.id) {
+            ops.push((b) => b.delete(doc(db, 'parteMensualReports', r.id)));
+          }
+        }
+        for (const r of monthlyReports) {
+          if (r.schoolId === target.id) {
+            ops.push((b) => b.delete(doc(db, 'monthlyReports', r.id)));
+          }
+        }
+        for (const c of activityCompliances) {
+          if (c.schoolId === target.id) {
+            ops.push((b) => b.delete(doc(db, 'activityCompliances', c.id)));
+          }
+        }
+      }
+
+      const CHUNK_SIZE = 400;
+      for (let i = 0; i < ops.length; i += CHUNK_SIZE) {
+        const batch = writeBatch(db);
+        for (const op of ops.slice(i, i + CHUNK_SIZE)) {
+          op(batch);
+        }
+        await batch.commit();
+      }
+
+      if (editingSchoolId === target.id) {
+        setEditingSchoolId(null);
+      }
+      if (consSchoolId === target.id) {
+        setConsSchoolId('all');
+      }
+      setDeletingSchool(null);
+      setDeleteSchoolReportsToo(false);
+      setSchoolCatalogBanner({
+        type: 'ok',
+        text: `Centro "${target.name}" (${target.saceCode}) eliminado del catálogo oficial.`,
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `schools/${target.id}`);
+      setSchoolCatalogBanner({
+        type: 'err',
+        text: 'No se pudo eliminar el centro educativo. Verifica tu conexión o permisos.',
+      });
     } finally {
       setActionBusy(false);
     }
@@ -1489,6 +1581,26 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
               </div>
             </div>
 
+            {schoolCatalogBanner && (
+              <div
+                className={`px-5 py-3 border-b text-xs flex items-center justify-between gap-3 ${
+                  schoolCatalogBanner.type === 'ok'
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                    : 'bg-red-50 border-red-200 text-red-900'
+                }`}
+              >
+                <span>{schoolCatalogBanner.text}</span>
+                <button
+                  type="button"
+                  onClick={() => setSchoolCatalogBanner(null)}
+                  className="text-slate-500 hover:text-slate-800 cursor-pointer"
+                  aria-label="Cerrar aviso"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
             {showNewSchool && (
               <form
                 onSubmit={handleCreateSchool}
@@ -1935,15 +2047,30 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                         <td className="px-4 py-2.5 text-slate-600">
                           {s.sector === 'no_gubernamental' ? 'No Gubernamental' : 'Gubernamental'}
                         </td>
-                        <td className="px-4 py-2.5 text-right">
-                          <button
-                            type="button"
-                            onClick={() => handleStartEditSchool(s)}
-                            className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:underline cursor-pointer whitespace-nowrap"
-                          >
-                            <Pencil className="w-3 h-3" />
-                            Editar
-                          </button>
+                        <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                          <div className="inline-flex items-center justify-end gap-3">
+                            <button
+                              type="button"
+                              disabled={actionBusy}
+                              onClick={() => handleStartEditSchool(s)}
+                              className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:underline cursor-pointer disabled:opacity-50"
+                            >
+                              <Pencil className="w-3 h-3" />
+                              Editar
+                            </button>
+                            <button
+                              type="button"
+                              disabled={actionBusy}
+                              onClick={() => {
+                                setDeletingSchool(s);
+                                setDeleteSchoolReportsToo(false);
+                              }}
+                              className="inline-flex items-center gap-1 text-xs font-medium text-red-700 hover:underline cursor-pointer disabled:opacity-50"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              Eliminar
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -2833,6 +2960,104 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
           )}
         </div>
       )}
+
+      {deletingSchool && (() => {
+        const linkedUsersCount = users.filter((u) => u.schoolId === deletingSchool.id).length;
+        const linkedAnnualCount = annualReports.filter((r) => r.schoolId === deletingSchool.id).length;
+        const linkedParteCount = parteMensualReports.filter((r) => r.schoolId === deletingSchool.id).length;
+        const linkedMonthlyCount = monthlyReports.filter((r) => r.schoolId === deletingSchool.id).length;
+        const linkedComplianceCount = activityCompliances.filter(
+          (c) => c.schoolId === deletingSchool.id
+        ).length;
+        const linkedReportsTotal =
+          linkedAnnualCount + linkedParteCount + linkedMonthlyCount + linkedComplianceCount;
+
+        return (
+          <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
+            <div className="bg-white border border-slate-200 max-w-md w-full p-5 space-y-4 shadow-xl">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2.5">
+                  <div className="p-2 bg-red-50 border border-red-200 text-red-700 shrink-0">
+                    <AlertTriangle className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-display text-sm font-bold text-slate-900">
+                      Eliminar centro del catálogo oficial
+                    </h3>
+                    <p className="text-xs text-slate-600 mt-0.5">
+                      Esta acción eliminará el centro educativo de forma permanente.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={actionBusy}
+                  onClick={() => setDeletingSchool(null)}
+                  className="text-slate-400 hover:text-slate-700 cursor-pointer"
+                  aria-label="Cerrar"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-3 bg-slate-50 border border-slate-200 text-xs space-y-1">
+                <p className="font-semibold text-slate-900">{deletingSchool.name}</p>
+                <p className="text-slate-600">
+                  Código SACE: <span className="font-mono">{deletingSchool.saceCode}</span> ·{' '}
+                  {deletingSchool.community || 'Omoa'}
+                </p>
+                {deletingSchool.directorDisplayName && (
+                  <p className="text-slate-600">
+                    Director asignado: {deletingSchool.directorDisplayName}
+                  </p>
+                )}
+              </div>
+
+              {linkedUsersCount > 0 && (
+                <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 p-2.5">
+                  Hay {linkedUsersCount} usuario(s) vinculado(s) a este centro; quedarán sin centro asignado para poder vincularse a otro centro.
+                </p>
+              )}
+
+              {linkedReportsTotal > 0 && (
+                <label className="flex items-start gap-2 text-xs text-slate-700 bg-slate-50 border border-slate-200 p-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={deleteSchoolReportsToo}
+                    onChange={(e) => setDeleteSchoolReportsToo(e.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    Eliminar también los <strong>{linkedReportsTotal}</strong> registro(s) asociado(s)
+                    ({linkedParteCount} parte(s) mensual(es), {linkedMonthlyCount} movimiento(s),{' '}
+                    {linkedAnnualCount} cuadro(s) anual(es), {linkedComplianceCount} cumplimiento(s)).
+                  </span>
+                </label>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  disabled={actionBusy}
+                  onClick={() => setDeletingSchool(null)}
+                  className="px-3.5 py-1.5 text-xs font-medium border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={actionBusy}
+                  onClick={handleConfirmDeleteSchool}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium bg-red-700 hover:bg-red-800 text-white cursor-pointer disabled:opacity-50"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  {actionBusy ? 'Eliminando...' : 'Sí, eliminar centro'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

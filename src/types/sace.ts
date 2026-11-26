@@ -267,7 +267,12 @@ export type BasicaEvalAreaKey =
   | 'espanol'
   | 'matematicas'
   | 'cienciasNaturales'
-  | 'cienciasSociales';
+  | 'cienciasSociales'
+  | 'educacionCivica'
+  | 'educacionArtistica'
+  | 'ingles'
+  | 'educacionFisica'
+  | 'tecnologia';
 
 export type BasicaEgresadoAgeKey =
   | 'e10'

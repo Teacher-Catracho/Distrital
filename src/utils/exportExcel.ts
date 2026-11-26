@@ -729,7 +729,11 @@ export async function exportBasicaExcel(data: BasicaAnnualData, meta: ExportMeta
     let sumAp = emptyFM();
     let sumRep = emptyFM();
     for (const g of activeGrades) {
-      const cell = data.evaluacionPorAreas[area.key][g.key];
+      const cell = data.evaluacionPorAreas?.[area.key]?.[g.key] || {
+        evaluados: emptyFM(),
+        aprobados: emptyFM(),
+        reprobados: emptyFM(),
+      };
       sumEv = addFM(sumEv, cell.evaluados);
       sumAp = addFM(sumAp, cell.aprobados);
       sumRep = addFM(sumRep, cell.reprobados);

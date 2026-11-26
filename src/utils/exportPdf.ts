@@ -486,11 +486,16 @@ export function exportBasicaPdf(data: BasicaAnnualData, meta: ExportMeta) {
   doc.addPage('legal', 'landscape');
   const egTitleShort = scope === 'c1_2' ? '6°' : scope === 'c3' ? '9°' : '6°/9°';
   y = drawHeader(doc, `EVALUACIÓN POR ÁREAS Y EGRESADOS ${egTitleShort} · ${scopeSuffix} ${meta.year}`, meta);
+  const firstAreasPage = (doc as any).internal.getCurrentPageInfo().pageNumber;
   for (const area of BASICA_EVAL_AREAS) {
     const body: any[] = [];
     let sEv = emptyFM(), sAp = emptyFM(), sRep = emptyFM();
     for (const g of activeGrades) {
-      const cell = data.evaluacionPorAreas[area.key][g.key];
+      const cell = data.evaluacionPorAreas?.[area.key]?.[g.key] || {
+        evaluados: emptyFM(),
+        aprobados: emptyFM(),
+        reprobados: emptyFM(),
+      };
       sEv = addFM(sEv, cell.evaluados);
       sAp = addFM(sAp, cell.aprobados);
       sRep = addFM(sRep, cell.reprobados);
@@ -507,6 +512,10 @@ export function exportBasicaPdf(data: BasicaAnnualData, meta: ExportMeta) {
       sAp.f, sAp.m, totalFM(sAp),
       sRep.f, sRep.m, totalFM(sRep),
     ]);
+    if (y > 145) {
+      doc.addPage('legal', 'landscape');
+      y = 14;
+    }
     autoTable(doc, {
       startY: y,
       head: [
@@ -521,18 +530,17 @@ export function exportBasicaPdf(data: BasicaAnnualData, meta: ExportMeta) {
       ],
       body,
       theme: 'grid',
-      styles: { fontSize: 6.3, cellPadding: 1, halign: 'right', lineColor: [30, 41, 59], lineWidth: 0.2 },
+      styles: { fontSize: 6.1, cellPadding: 0.9, halign: 'right', lineColor: [30, 41, 59], lineWidth: 0.2 },
       headStyles: { fillColor: [253, 230, 138], textColor: [15, 23, 42], fontStyle: 'bold', halign: 'center' },
       margin: { left: 10, right: 150 },
     });
     y = (doc as any).lastAutoTable.finalY + 4;
-    if (y > 160) {
-      doc.addPage('legal', 'landscape');
-      y = 14;
-    }
   }
 
-  // Egresados table
+  const lastAreasPage = doc.getNumberOfPages();
+  doc.setPage(firstAreasPage);
+
+  // Egresados table (right column of first areas page)
   const egBody: any[] = [];
   let egSum = emptyFM();
   for (const age of BASICA_EGRESADOS_AGES) {
@@ -559,7 +567,9 @@ export function exportBasicaPdf(data: BasicaAnnualData, meta: ExportMeta) {
     headStyles: { fillColor: [191, 219, 254], textColor: [15, 23, 42], fontStyle: 'bold', halign: 'center' },
     margin: { left: 220, right: 10 },
   });
-  drawSignatures(doc, (doc as any).lastAutoTable.finalY, meta);
+  const egresadosFinalY = (doc as any).lastAutoTable.finalY;
+  doc.setPage(lastAreasPage);
+  drawSignatures(doc, lastAreasPage === firstAreasPage ? Math.max(y, egresadosFinalY) : y, meta);
 
   // Page 6: Cuadro Resumen por Asignatura (por Denominación de Notas)
   doc.addPage('legal', 'landscape');

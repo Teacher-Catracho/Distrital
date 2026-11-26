@@ -85,9 +85,25 @@ function normalizeBasicaData(raw?: BasicaAnnualData): BasicaAnnualData {
       }
     }
   }
+  const evaluacionPorAreas = { ...base.evaluacionPorAreas };
+  for (const area of BASICA_EVAL_AREAS) {
+    const areaMap = { ...base.evaluacionPorAreas[area.key] };
+    for (const g of [...BASICA_CYCLE_1_2, ...BASICA_CYCLE_3]) {
+      const existingAreaCell = raw.evaluacionPorAreas?.[area.key]?.[g.key];
+      if (existingAreaCell) {
+        areaMap[g.key] = {
+          evaluados: { ...emptyFM(), ...existingAreaCell.evaluados },
+          aprobados: { ...emptyFM(), ...existingAreaCell.aprobados },
+          reprobados: { ...emptyFM(), ...existingAreaCell.reprobados },
+        };
+      }
+    }
+    evaluacionPorAreas[area.key] = areaMap;
+  }
   return {
     ...base,
     ...raw,
+    evaluacionPorAreas,
     resumenDenominacion,
   };
 }
@@ -1186,7 +1202,7 @@ export function BasicaAnnualEditor({
             })}
           </div>
 
-          <div className="xl:col-span-4 bg-white border border-slate-200 overflow-x-auto">
+          <div className="xl:col-span-4 bg-white border border-slate-200 overflow-x-auto xl:sticky xl:top-4">
             <div className="p-3 bg-blue-50 border-b border-slate-300 space-y-1">
               <h3 className="font-display text-xs font-bold text-slate-900">
                 {effectiveScope === 'c1_2'

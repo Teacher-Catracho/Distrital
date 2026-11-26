@@ -340,6 +340,11 @@ export const BASICA_EVAL_AREAS: { key: BasicaEvalAreaKey; label: string }[] = [
   { key: 'matematicas', label: 'MATEMÁTICAS' },
   { key: 'cienciasNaturales', label: 'CIENCIAS NATURALES' },
   { key: 'cienciasSociales', label: 'CIENCIAS SOCIALES' },
+  { key: 'educacionCivica', label: 'EDUCACIÓN CÍVICA' },
+  { key: 'educacionArtistica', label: 'EDUCACIÓN ARTÍSTICA' },
+  { key: 'ingles', label: 'INGLÉS' },
+  { key: 'educacionFisica', label: 'EDUCACIÓN FÍSICA' },
+  { key: 'tecnologia', label: 'TECNOLOGÍA' },
 ];
 
 export const BASICA_EGRESADOS_AGES: { key: BasicaEgresadoAgeKey; label: string }[] = [
