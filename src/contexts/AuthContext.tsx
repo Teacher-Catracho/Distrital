@@ -375,6 +375,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (payload.district !== '18' && payload.district !== '18-B') {
       throw new Error('Selecciona el distrito educativo al que pertenece el centro (Distrito 18 o Distrito 18-B).');
     }
+    if (levels.includes('prebasica') && !payload.prebasicaType) {
+      throw new Error('Selecciona el tipo de centro de Prebásica (Normal, CEP-U o CCPREB).');
+    }
+    const effectiveBasicaScope: BasicaScope = payload.basicaScope || 'c1_2_3';
+    if (levels.includes('basica') && effectiveBasicaScope === 'c1_2' && !payload.basicaType) {
+      throw new Error('Selecciona el tipo de centro de Básica de 1° a 6° grado (Normal o PROHECO).');
+    }
 
     try {
       await updateProfile(firebaseUser, { displayName });
@@ -397,15 +404,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         community,
         district: payload.district,
         levels,
-        prebasicaType: levels.includes('prebasica')
-          ? payload.prebasicaType || 'CEPB'
-          : deleteField(),
-        basicaScope: levels.includes('basica')
-          ? payload.basicaScope || 'c1_2_3'
-          : deleteField(),
-        basicaType: levels.includes('basica')
-          ? payload.basicaType || 'gubernamental'
-          : deleteField(),
+        prebasicaType:
+          levels.includes('prebasica') && payload.prebasicaType
+            ? payload.prebasicaType
+            : deleteField(),
+        basicaScope: levels.includes('basica') ? effectiveBasicaScope : deleteField(),
+        basicaType:
+          levels.includes('basica') && effectiveBasicaScope === 'c1_2' && payload.basicaType
+            ? payload.basicaType
+            : deleteField(),
         sector: payload.sector,
         modality: payload.modality,
         directorUid: firebaseUser.uid,
@@ -439,13 +446,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         community,
         district: payload.district,
         levels,
-        ...(levels.includes('prebasica')
-          ? { prebasicaType: payload.prebasicaType || 'CEPB' }
+        ...(levels.includes('prebasica') && payload.prebasicaType
+          ? { prebasicaType: payload.prebasicaType }
           : {}),
         ...(levels.includes('basica')
           ? {
-              basicaScope: payload.basicaScope || 'c1_2_3',
-              basicaType: payload.basicaType || 'gubernamental',
+              basicaScope: effectiveBasicaScope,
+              ...(effectiveBasicaScope === 'c1_2' && payload.basicaType
+                ? { basicaType: payload.basicaType }
+                : {}),
             }
           : {}),
         sector: payload.sector,

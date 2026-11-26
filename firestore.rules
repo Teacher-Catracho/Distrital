@@ -107,8 +107,8 @@ service cloud.firestore {
         (!('district' in data) || data.district in ['18', '18-B']) &&
         isValidLevelList(data.levels) &&
         (!('basicaScope' in data) || data.basicaScope in ['c1_2', 'c3', 'c1_2_3']) &&
-        (!('prebasicaType' in data) || data.prebasicaType in ['CEPB', 'CCEPREB', 'CEP-U']) &&
-        (!('basicaType' in data) || data.basicaType in ['gubernamental', 'proheco']) &&
+        (!('prebasicaType' in data) || data.prebasicaType in ['Normal', 'CEP-U', 'CCPREB', 'CEPB', 'CCEPREB']) &&
+        (!('basicaType' in data) || data.basicaType in ['normal', 'proheco', 'gubernamental']) &&
         data.sector in ['gubernamental', 'no_gubernamental'] &&
         data.modality in ['presencial', 'isemed', 'acelerado'] &&
         data.directorUid is string && data.directorUid.size() <= 128 &&
@@ -167,8 +167,8 @@ service cloud.firestore {
         (!('proposedDistrict' in data) || data.proposedDistrict in ['18', '18-B']) &&
         isValidLevelList(data.proposedLevels) &&
         (!('proposedBasicaScope' in data) || data.proposedBasicaScope in ['c1_2', 'c3', 'c1_2_3']) &&
-        (!('proposedPrebasicaType' in data) || data.proposedPrebasicaType in ['CEPB', 'CCEPREB', 'CEP-U']) &&
-        (!('proposedBasicaType' in data) || data.proposedBasicaType in ['gubernamental', 'proheco']) &&
+        (!('proposedPrebasicaType' in data) || data.proposedPrebasicaType in ['Normal', 'CEP-U', 'CCPREB', 'CEPB', 'CCEPREB']) &&
+        (!('proposedBasicaType' in data) || data.proposedBasicaType in ['normal', 'proheco', 'gubernamental']) &&
         (!('directorPhone' in data) || (data.directorPhone is string && data.directorPhone.size() <= 30)) &&
         data.proposedSector in ['gubernamental', 'no_gubernamental'] &&
         data.proposedModality in ['presencial', 'isemed', 'acelerado'] &&

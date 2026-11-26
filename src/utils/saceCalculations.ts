@@ -11,6 +11,9 @@ import type {
   BasicaGradeKey,
   BasicaScope,
   BasicaSubjectKey,
+  CanonicalBasicaCenterType,
+  CanonicalPrebasicaCenterType,
+  CenterTypeFilter,
   DistrictCode,
   EducationLevel,
   EstadisticoRow,
@@ -151,22 +154,83 @@ export function getSchoolLevelLabel(
   return `Básica (${BASICA_SCOPE_SHORT_LABELS[scope]})`;
 }
 
-export const PREBASICA_CENTER_TYPES: PrebasicaCenterType[] = ['CEPB', 'CCEPREB', 'CEP-U'];
+export const PREBASICA_CENTER_TYPES: CanonicalPrebasicaCenterType[] = [
+  'Normal',
+  'CEP-U',
+  'CCPREB',
+];
+
+export function normalizePrebasicaCenterType(
+  value?: string | null
+): CanonicalPrebasicaCenterType | undefined {
+  if (!value) return undefined;
+  if (value === 'Normal' || value === 'CEPB') return 'Normal';
+  if (value === 'CEP-U') return 'CEP-U';
+  if (value === 'CCPREB' || value === 'CCEPREB') return 'CCPREB';
+  return undefined;
+}
+
+export const BASICA_CENTER_TYPES: CanonicalBasicaCenterType[] = ['normal', 'proheco'];
 
 export const BASICA_CENTER_TYPE_LABELS: Record<BasicaCenterType, string> = {
-  gubernamental: 'Gubernamental',
+  normal: 'Normal',
+  gubernamental: 'Normal',
   proheco: 'PROHECO',
 };
 
+export function normalizeBasicaCenterType(
+  value?: string | null
+): CanonicalBasicaCenterType | undefined {
+  if (!value) return undefined;
+  if (value === 'normal' || value === 'gubernamental') return 'normal';
+  if (value === 'proheco') return 'proheco';
+  return undefined;
+}
+
+export const CENTER_TYPE_FILTER_OPTIONS: { value: CenterTypeFilter; label: string }[] = [
+  { value: 'all', label: 'Todos los tipos de centro' },
+  { value: 'prebasica:Normal', label: 'Prebásica · Normal' },
+  { value: 'prebasica:CEP-U', label: 'Prebásica · CEP-U' },
+  { value: 'prebasica:CCPREB', label: 'Prebásica · CCPREB' },
+  { value: 'basica:normal', label: 'Básica (1° a 6°) · Normal' },
+  { value: 'basica:proheco', label: 'Básica (1° a 6°) · PROHECO' },
+];
+
+export function getCenterTypeFilterLabel(filter: CenterTypeFilter): string {
+  return CENTER_TYPE_FILTER_OPTIONS.find((o) => o.value === filter)?.label || 'Todos los tipos de centro';
+}
+
+export function schoolMatchesCenterTypeFilter(
+  school: Pick<School, 'levels' | 'basicaScope' | 'prebasicaType' | 'basicaType'> | undefined,
+  filter: CenterTypeFilter
+): boolean {
+  if (filter === 'all') return true;
+  if (!school) return false;
+  if (filter.startsWith('prebasica:')) {
+    if (!school.levels.includes('prebasica')) return false;
+    const expected = filter.slice('prebasica:'.length) as CanonicalPrebasicaCenterType;
+    return normalizePrebasicaCenterType(school.prebasicaType) === expected;
+  }
+  if (filter.startsWith('basica:')) {
+    if (!school.levels.includes('basica')) return false;
+    if (getBasicaScope(school) !== 'c1_2') return false;
+    const expected = filter.slice('basica:'.length) as CanonicalBasicaCenterType;
+    return normalizeBasicaCenterType(school.basicaType) === expected;
+  }
+  return true;
+}
+
 export function getSchoolCenterTypesSummary(
-  school: Pick<School, 'levels' | 'prebasicaType' | 'basicaType'>
+  school: Pick<School, 'levels' | 'basicaScope' | 'prebasicaType' | 'basicaType'>
 ): string {
   const parts: string[] = [];
-  if (school.levels.includes('prebasica') && school.prebasicaType) {
-    parts.push(`Preescolar: ${school.prebasicaType}`);
+  const preType = normalizePrebasicaCenterType(school.prebasicaType);
+  if (school.levels.includes('prebasica') && preType) {
+    parts.push(`Prebásica: ${preType}`);
   }
-  if (school.levels.includes('basica') && school.basicaType) {
-    parts.push(`Básica: ${BASICA_CENTER_TYPE_LABELS[school.basicaType]}`);
+  const basType = normalizeBasicaCenterType(school.basicaType);
+  if (school.levels.includes('basica') && getBasicaScope(school) === 'c1_2' && basType) {
+    parts.push(`Básica (1° a 6°): ${BASICA_CENTER_TYPE_LABELS[basType]}`);
   }
   return parts.join(' · ');
 }

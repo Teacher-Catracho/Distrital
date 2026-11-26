@@ -1,8 +1,17 @@
 export type EducationLevel = 'prebasica' | 'basica' | 'media';
 export type DistrictCode = '18' | '18-B';
 export type BasicaScope = 'c1_2' | 'c3' | 'c1_2_3';
-export type PrebasicaCenterType = 'CEPB' | 'CCEPREB' | 'CEP-U';
-export type BasicaCenterType = 'gubernamental' | 'proheco';
+export type CanonicalPrebasicaCenterType = 'Normal' | 'CEP-U' | 'CCPREB';
+export type PrebasicaCenterType = CanonicalPrebasicaCenterType | 'CEPB' | 'CCEPREB';
+export type CanonicalBasicaCenterType = 'normal' | 'proheco';
+export type BasicaCenterType = CanonicalBasicaCenterType | 'gubernamental';
+export type CenterTypeFilter =
+  | 'all'
+  | 'prebasica:Normal'
+  | 'prebasica:CEP-U'
+  | 'prebasica:CCPREB'
+  | 'basica:normal'
+  | 'basica:proheco';
 export type ReportStatus = 'draft' | 'submitted' | 'approved' | 'returned';
 export type UserRole = 'pending' | 'director' | 'admin';
 export type AdminPosition = 'administrador' | 'asistente_tecnico';

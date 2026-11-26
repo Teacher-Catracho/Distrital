@@ -2,15 +2,17 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock, LogOut, Search, UserCheck } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import type {
-  BasicaCenterType,
   BasicaScope,
+  CanonicalBasicaCenterType,
+  CanonicalPrebasicaCenterType,
   DistrictCode,
   EducationLevel,
   ModalityType,
-  PrebasicaCenterType,
   SectorType,
 } from '../types/sace';
 import {
+  BASICA_CENTER_TYPES,
+  BASICA_CENTER_TYPE_LABELS,
   BASICA_SCOPE_LABELS,
   DISTRICT_OPTIONS,
   LEVEL_LABELS,
@@ -18,6 +20,8 @@ import {
   formatAccountIdentifier,
   getDistrictLabel,
   getSchoolLevelLabel,
+  normalizeBasicaCenterType,
+  normalizePrebasicaCenterType,
   normalizeSaceCodeForAuth,
 } from '../utils/saceCalculations';
 
@@ -74,11 +78,15 @@ export function DirectorOnboarding() {
   const [proposedBasicaScope, setProposedBasicaScope] = useState<BasicaScope>(
     directorRequest?.proposedBasicaScope || matchedCatalogSchool?.basicaScope || 'c1_2_3'
   );
-  const [proposedPrebasicaType, setProposedPrebasicaType] = useState<PrebasicaCenterType>(
-    directorRequest?.proposedPrebasicaType || matchedCatalogSchool?.prebasicaType || 'CEPB'
+  const [proposedPrebasicaType, setProposedPrebasicaType] = useState<CanonicalPrebasicaCenterType | ''>(
+    normalizePrebasicaCenterType(
+      directorRequest?.proposedPrebasicaType || matchedCatalogSchool?.prebasicaType
+    ) || ''
   );
-  const [proposedBasicaType, setProposedBasicaType] = useState<BasicaCenterType>(
-    directorRequest?.proposedBasicaType || matchedCatalogSchool?.basicaType || 'gubernamental'
+  const [proposedBasicaType, setProposedBasicaType] = useState<CanonicalBasicaCenterType | ''>(
+    normalizeBasicaCenterType(
+      directorRequest?.proposedBasicaType || matchedCatalogSchool?.basicaType
+    ) || ''
   );
   const [proposedSector, setProposedSector] = useState<SectorType>(
     directorRequest?.proposedSector || matchedCatalogSchool?.sector || 'gubernamental'
@@ -111,10 +119,12 @@ export function DirectorOnboarding() {
       setProposedBasicaScope(matchedCatalogSchool.basicaScope);
     }
     if (matchedCatalogSchool.prebasicaType) {
-      setProposedPrebasicaType(matchedCatalogSchool.prebasicaType);
+      const normalizedPre = normalizePrebasicaCenterType(matchedCatalogSchool.prebasicaType);
+      if (normalizedPre) setProposedPrebasicaType(normalizedPre);
     }
     if (matchedCatalogSchool.basicaType) {
-      setProposedBasicaType(matchedCatalogSchool.basicaType);
+      const normalizedBas = normalizeBasicaCenterType(matchedCatalogSchool.basicaType);
+      if (normalizedBas) setProposedBasicaType(normalizedBas);
     }
     setProposedSector(matchedCatalogSchool.sector);
     setProposedModality(matchedCatalogSchool.modality);
@@ -175,6 +185,18 @@ export function DirectorOnboarding() {
         setError('Selecciona al menos un nivel educativo que atiende el centro.');
         return;
       }
+      if (proposedLevels.includes('prebasica') && !proposedPrebasicaType) {
+        setError('Selecciona el tipo de centro de Prebásica (Normal, CEP-U o CCPREB).');
+        return;
+      }
+      if (
+        proposedLevels.includes('basica') &&
+        proposedBasicaScope === 'c1_2' &&
+        !proposedBasicaType
+      ) {
+        setError('Selecciona el tipo de centro para Básica de 1° a 6° grado (Normal o PROHECO).');
+        return;
+      }
 
       setSubmitting(true);
       try {
@@ -186,11 +208,16 @@ export function DirectorOnboarding() {
           community: proposedCommunity.trim(),
           district: proposedDistrict,
           levels: proposedLevels,
-          ...(proposedLevels.includes('prebasica')
+          ...(proposedLevels.includes('prebasica') && proposedPrebasicaType
             ? { prebasicaType: proposedPrebasicaType }
             : {}),
           ...(proposedLevels.includes('basica')
-            ? { basicaScope: proposedBasicaScope, basicaType: proposedBasicaType }
+            ? {
+                basicaScope: proposedBasicaScope,
+                ...(proposedBasicaScope === 'c1_2' && proposedBasicaType
+                  ? { basicaType: proposedBasicaType }
+                  : {}),
+              }
             : {}),
           sector: proposedSector,
           modality: proposedModality,
@@ -243,6 +270,18 @@ export function DirectorOnboarding() {
         setError('Selecciona el distrito al que pertenece el centro educativo (Distrito 18 o Distrito 18-B).');
         return;
       }
+      if (proposedLevels.includes('prebasica') && !proposedPrebasicaType) {
+        setError('Selecciona el tipo de centro de Prebásica (Normal, CEP-U o CCPREB).');
+        return;
+      }
+      if (
+        proposedLevels.includes('basica') &&
+        proposedBasicaScope === 'c1_2' &&
+        !proposedBasicaType
+      ) {
+        setError('Selecciona el tipo de centro para Básica de 1° a 6° grado (Normal o PROHECO).');
+        return;
+      }
       setSubmitting(true);
       try {
         await submitDirectorRequest({
@@ -256,9 +295,16 @@ export function DirectorOnboarding() {
           proposedCommunity: proposedCommunity.trim() || 'Omoa',
           proposedDistrict,
           proposedLevels,
-          ...(proposedLevels.includes('prebasica') ? { proposedPrebasicaType } : {}),
+          ...(proposedLevels.includes('prebasica') && proposedPrebasicaType
+            ? { proposedPrebasicaType }
+            : {}),
           ...(proposedLevels.includes('basica')
-            ? { proposedBasicaScope, proposedBasicaType }
+            ? {
+                proposedBasicaScope,
+                ...(proposedBasicaScope === 'c1_2' && proposedBasicaType
+                  ? { proposedBasicaType }
+                  : {}),
+              }
             : {}),
           proposedSector,
           proposedModality,
@@ -626,15 +672,19 @@ export function DirectorOnboarding() {
                     {proposedLevels.includes('prebasica') && (
                       <div className="mt-3">
                         <label className="block text-xs font-medium text-slate-700 mb-1">
-                          Tipo de centro (Preescolar / Prebásica)
+                          Tipo de centro (Prebásica) *
                         </label>
                         <select
+                          required
                           value={proposedPrebasicaType}
                           onChange={(e) =>
-                            setProposedPrebasicaType(e.target.value as PrebasicaCenterType)
+                            setProposedPrebasicaType(
+                              e.target.value as CanonicalPrebasicaCenterType | ''
+                            )
                           }
                           className="w-full px-2.5 py-2 text-xs border border-slate-300 bg-white"
                         >
+                          <option value="">Selecciona tipo de centro...</option>
                           {PREBASICA_CENTER_TYPES.map((t) => (
                             <option key={t} value={t}>
                               {t}
@@ -647,7 +697,7 @@ export function DirectorOnboarding() {
                       <div className="mt-3 space-y-3">
                         <div>
                           <label className="block text-xs font-medium text-slate-700 mb-1">
-                            Subnivel de Básica
+                            Subnivel de Básica *
                           </label>
                           <select
                             value={proposedBasicaScope}
@@ -661,21 +711,30 @@ export function DirectorOnboarding() {
                             ))}
                           </select>
                         </div>
-                        <div>
-                          <label className="block text-xs font-medium text-slate-700 mb-1">
-                            Tipo de centro (Básica)
-                          </label>
-                          <select
-                            value={proposedBasicaType}
-                            onChange={(e) =>
-                              setProposedBasicaType(e.target.value as BasicaCenterType)
-                            }
-                            className="w-full px-2.5 py-2 text-xs border border-slate-300 bg-white"
-                          >
-                            <option value="gubernamental">Gubernamental</option>
-                            <option value="proheco">PROHECO</option>
-                          </select>
-                        </div>
+                        {proposedBasicaScope === 'c1_2' && (
+                          <div>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">
+                              Tipo de centro (Básica de 1° a 6° grado) *
+                            </label>
+                            <select
+                              required
+                              value={proposedBasicaType}
+                              onChange={(e) =>
+                                setProposedBasicaType(
+                                  e.target.value as CanonicalBasicaCenterType | ''
+                                )
+                              }
+                              className="w-full px-2.5 py-2 text-xs border border-slate-300 bg-white"
+                            >
+                              <option value="">Selecciona tipo de centro...</option>
+                              {BASICA_CENTER_TYPES.map((t) => (
+                                <option key={t} value={t}>
+                                  {BASICA_CENTER_TYPE_LABELS[t]}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

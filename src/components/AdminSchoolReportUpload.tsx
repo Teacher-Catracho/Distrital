@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import type {
   AnnualReport,
+  CenterTypeFilter,
   DistrictCode,
   EducationLevel,
   MonthlyReport,
@@ -18,11 +19,14 @@ import type {
   UserProfile,
 } from '../types/sace';
 import {
+  CENTER_TYPE_FILTER_OPTIONS,
   DISTRICT_OPTIONS,
   MONTHS,
   getBasicaScope,
   getDistrictLabel,
+  getSchoolCenterTypesSummary,
   getSchoolLevelLabel,
+  schoolMatchesCenterTypeFilter,
 } from '../utils/saceCalculations';
 import { BasicaAnnualEditor } from './BasicaAnnualEditor';
 import { MediaAnnualEditor } from './MediaAnnualEditor';
@@ -100,6 +104,7 @@ export function AdminSchoolReportUpload({
 }: AdminSchoolReportUploadProps) {
   const [kind, setKind] = useState<UploadReportKind>('parteMensual');
   const [selectedDistrict, setSelectedDistrict] = useState<'all' | DistrictCode | 'unassigned'>('all');
+  const [selectedCenterType, setSelectedCenterType] = useState<CenterTypeFilter>('all');
   const [schoolSearch, setSchoolSearch] = useState('');
   const [selectedSchoolId, setSelectedSchoolId] = useState<string>('');
   const [selectedLevel, setSelectedLevel] = useState<EducationLevel>('basica');
@@ -119,20 +124,26 @@ export function AdminSchoolReportUpload({
   );
 
   const filteredSchools = useMemo(() => {
-    const byDistrict = sortedSchools.filter((s) => {
-      if (selectedDistrict === 'all') return true;
-      if (selectedDistrict === 'unassigned') return !s.district;
-      return s.district === selectedDistrict;
+    const byFilters = sortedSchools.filter((s) => {
+      if (selectedDistrict === 'unassigned') {
+        if (s.district) return false;
+      } else if (selectedDistrict !== 'all' && s.district !== selectedDistrict) {
+        return false;
+      }
+      if (!schoolMatchesCenterTypeFilter(s, selectedCenterType)) {
+        return false;
+      }
+      return true;
     });
     const q = schoolSearch.trim().toLowerCase();
-    if (!q) return byDistrict;
-    return byDistrict.filter(
+    if (!q) return byFilters;
+    return byFilters.filter(
       (s) =>
         s.name.toLowerCase().includes(q) ||
         s.saceCode.toLowerCase().includes(q) ||
         s.community.toLowerCase().includes(q)
     );
-  }, [sortedSchools, selectedDistrict, schoolSearch]);
+  }, [sortedSchools, selectedDistrict, selectedCenterType, schoolSearch]);
 
   useEffect(() => {
     if (filteredSchools.length === 0) {
@@ -297,7 +308,24 @@ export function AdminSchoolReportUpload({
             </select>
           </div>
 
-          <div className="md:col-span-3">
+          <div className="md:col-span-2">
+            <label className="block font-medium text-slate-700 mb-1">
+              Tipo de centro
+            </label>
+            <select
+              value={selectedCenterType}
+              onChange={(e) => setSelectedCenterType(e.target.value as CenterTypeFilter)}
+              className="w-full px-2.5 py-2 border border-slate-300 bg-white"
+            >
+              {CENTER_TYPE_FILTER_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="md:col-span-2">
             <label className="block font-medium text-slate-700 mb-1">
               Buscar centro o SACE
             </label>
@@ -307,13 +335,13 @@ export function AdminSchoolReportUpload({
                 type="text"
                 value={schoolSearch}
                 onChange={(e) => setSchoolSearch(e.target.value)}
-                placeholder="Nombre, SACE o comunidad..."
+                placeholder="Nombre, SACE..."
                 className="w-full pl-8 pr-3 py-2 border border-slate-300 bg-white"
               />
             </div>
           </div>
 
-          <div className={kind === 'annual' ? 'md:col-span-4' : 'md:col-span-3'}>
+          <div className={kind === 'annual' ? 'md:col-span-3' : 'md:col-span-2'}>
             <label className="block font-medium text-slate-700 mb-1">
               Centro Educativo ({filteredSchools.length})
             </label>
@@ -398,6 +426,14 @@ export function AdminSchoolReportUpload({
                 </span>
                 <span aria-hidden="true">·</span>
                 <span>{selectedSchool.community}</span>
+                {getSchoolCenterTypesSummary(selectedSchool) && (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span className="font-medium text-slate-700">
+                      {getSchoolCenterTypesSummary(selectedSchool)}
+                    </span>
+                  </>
+                )}
                 <span aria-hidden="true">·</span>
                 <span>
                   Director(a):{' '}

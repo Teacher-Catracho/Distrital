@@ -31,8 +31,10 @@ import type {
   ActivityCompliance,
   AnnualReport,
   BasicaAnnualData,
-  BasicaCenterType,
   BasicaScope,
+  CanonicalBasicaCenterType,
+  CanonicalPrebasicaCenterType,
+  CenterTypeFilter,
   DirectorRequest,
   DistrictActivity,
   DistrictCode,
@@ -43,7 +45,6 @@ import type {
   MonthlyReport,
   ParteMensualReport,
   PrebasicaAnnualData,
-  PrebasicaCenterType,
   ReportStatus,
   School,
   SchoolContact,
@@ -52,10 +53,12 @@ import type {
 } from '../types/sace';
 import {
   BASICA_ALL_GRADES,
+  BASICA_CENTER_TYPES,
   BASICA_CENTER_TYPE_LABELS,
   BASICA_CYCLE_1_2,
   BASICA_CYCLE_3,
   BASICA_SCOPE_LABELS,
+  CENTER_TYPE_FILTER_OPTIONS,
   DEFAULT_YEAR,
   DISTRICT_OPTIONS,
   LEVEL_LABELS,
@@ -69,11 +72,15 @@ import {
   aggregatePrebasicaReports,
   formatAccountIdentifier,
   getBasicaScope,
+  getCenterTypeFilterLabel,
   getDefaultMonthDeadlineStr,
   getDistrictLabel,
   getSchoolCenterTypesSummary,
   getSchoolLevelLabel,
+  normalizeBasicaCenterType,
+  normalizePrebasicaCenterType,
   schoolMatchesBasicaScope,
+  schoolMatchesCenterTypeFilter,
   sumEstadisticoRows,
   totalNV,
 } from '../utils/saceCalculations';
@@ -157,12 +164,13 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
   const [newDirectorPhone, setNewDirectorPhone] = useState('');
   const [newLevels, setNewLevels] = useState<EducationLevel[]>(['basica']);
   const [newBasicaScope, setNewBasicaScope] = useState<BasicaScope>('c1_2_3');
-  const [newPrebasicaType, setNewPrebasicaType] = useState<PrebasicaCenterType>('CEPB');
-  const [newBasicaType, setNewBasicaType] = useState<BasicaCenterType>('gubernamental');
+  const [newPrebasicaType, setNewPrebasicaType] = useState<CanonicalPrebasicaCenterType>('Normal');
+  const [newBasicaType, setNewBasicaType] = useState<CanonicalBasicaCenterType>('normal');
   const [newSector, setNewSector] = useState<SectorType>('gubernamental');
   const [newModality, setNewModality] = useState<ModalityType>('presencial');
   const [schoolSearch, setSchoolSearch] = useState('');
   const [schoolDistrictFilter, setSchoolDistrictFilter] = useState<'all' | DistrictCode | 'unassigned'>('all');
+  const [schoolCenterTypeFilter, setSchoolCenterTypeFilter] = useState<CenterTypeFilter>('all');
 
   const [editingSchoolId, setEditingSchoolId] = useState<string | null>(null);
   const [editSchoolName, setEditSchoolName] = useState('');
@@ -172,8 +180,8 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
   const [editDirectorPhone, setEditDirectorPhone] = useState('');
   const [editLevels, setEditLevels] = useState<EducationLevel[]>(['basica']);
   const [editBasicaScope, setEditBasicaScope] = useState<BasicaScope>('c1_2_3');
-  const [editPrebasicaType, setEditPrebasicaType] = useState<PrebasicaCenterType>('CEPB');
-  const [editBasicaType, setEditBasicaType] = useState<BasicaCenterType>('gubernamental');
+  const [editPrebasicaType, setEditPrebasicaType] = useState<CanonicalPrebasicaCenterType>('Normal');
+  const [editBasicaType, setEditBasicaType] = useState<CanonicalBasicaCenterType>('normal');
   const [editSector, setEditSector] = useState<SectorType>('gubernamental');
   const [editModality, setEditModality] = useState<ModalityType>('presencial');
 
@@ -183,6 +191,7 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
   const [reviewKind, setReviewKind] = useState<'annual' | 'parteMensual' | 'monthly'>('parteMensual');
   const [reviewLevel, setReviewLevel] = useState<'all' | EducationLevel>('all');
   const [reviewBasicaScope, setReviewBasicaScope] = useState<'all' | BasicaScope>('all');
+  const [reviewCenterType, setReviewCenterType] = useState<CenterTypeFilter>('all');
   const [reviewStatus, setReviewStatus] = useState<'all' | ReportStatus>('all');
   const [reviewMonth, setReviewMonth] = useState<number>(new Date().getMonth() + 1);
   const [inspectingAnnual, setInspectingAnnual] = useState<AnnualReport | null>(null);
@@ -195,6 +204,7 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
   const [consKind, setConsKind] = useState<'annual' | 'parteMensual' | 'monthly'>('parteMensual');
   const [consLevel, setConsLevel] = useState<EducationLevel>('basica');
   const [consBasicaScope, setConsBasicaScope] = useState<BasicaScope>('c1_2_3');
+  const [consCenterType, setConsCenterType] = useState<CenterTypeFilter>('all');
   const [consMonth, setConsMonth] = useState<number>(() =>
     clampSchoolMonth(new Date().getMonth() + 1)
   );
@@ -380,7 +390,10 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
         levels: newLevels,
         ...(newLevels.includes('prebasica') ? { prebasicaType: newPrebasicaType } : {}),
         ...(newLevels.includes('basica')
-          ? { basicaScope: newBasicaScope, basicaType: newBasicaType }
+          ? {
+              basicaScope: newBasicaScope,
+              ...(newBasicaScope === 'c1_2' ? { basicaType: newBasicaType } : {}),
+            }
           : {}),
         sector: newSector,
         modality: newModality,
@@ -406,8 +419,8 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
       setNewDirectorPhone('');
       setNewDistrict('18-B');
       setNewBasicaScope('c1_2_3');
-      setNewPrebasicaType('CEPB');
-      setNewBasicaType('gubernamental');
+      setNewPrebasicaType('Normal');
+      setNewBasicaType('normal');
       setShowNewSchool(false);
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'schools');
@@ -425,8 +438,8 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
     setEditDirectorPhone(schoolContacts[s.id]?.directorPhone || '');
     setEditLevels(s.levels.length > 0 ? s.levels : ['basica']);
     setEditBasicaScope(s.basicaScope || 'c1_2_3');
-    setEditPrebasicaType(s.prebasicaType || 'CEPB');
-    setEditBasicaType(s.basicaType || 'gubernamental');
+    setEditPrebasicaType(normalizePrebasicaCenterType(s.prebasicaType) || 'Normal');
+    setEditBasicaType(normalizeBasicaCenterType(s.basicaType) || 'normal');
     setEditSector(s.sector);
     setEditModality(s.modality);
     setShowNewSchool(false);
@@ -445,7 +458,10 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
         levels: editLevels,
         prebasicaType: editLevels.includes('prebasica') ? editPrebasicaType : deleteField(),
         basicaScope: editLevels.includes('basica') ? editBasicaScope : deleteField(),
-        basicaType: editLevels.includes('basica') ? editBasicaType : deleteField(),
+        basicaType:
+          editLevels.includes('basica') && editBasicaScope === 'c1_2'
+            ? editBasicaType
+            : deleteField(),
         sector: editSector,
         modality: editModality,
         updatedAt: serverTimestamp(),
@@ -498,7 +514,9 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
           ...(req.proposedLevels.includes('basica')
             ? {
                 basicaScope: req.proposedBasicaScope || 'c1_2_3',
-                ...(req.proposedBasicaType ? { basicaType: req.proposedBasicaType } : {}),
+                ...(req.proposedBasicaScope === 'c1_2' && req.proposedBasicaType
+                  ? { basicaType: req.proposedBasicaType }
+                  : {}),
               }
             : {}),
           sector: req.proposedSector,
@@ -706,70 +724,88 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
   };
 
   const filteredSchools = useMemo(() => {
-    const byDistrict = schools.filter((s) => {
-      if (schoolDistrictFilter === 'all') return true;
-      if (schoolDistrictFilter === 'unassigned') return !s.district;
-      return s.district === schoolDistrictFilter;
+    const byFilters = schools.filter((s) => {
+      if (schoolDistrictFilter === 'unassigned') {
+        if (s.district) return false;
+      } else if (schoolDistrictFilter !== 'all' && s.district !== schoolDistrictFilter) {
+        return false;
+      }
+      if (!schoolMatchesCenterTypeFilter(s, schoolCenterTypeFilter)) {
+        return false;
+      }
+      return true;
     });
     const q = schoolSearch.trim().toLowerCase();
-    if (!q) return byDistrict;
-    return byDistrict.filter(
+    if (!q) return byFilters;
+    return byFilters.filter(
       (s) =>
         s.name.toLowerCase().includes(q) ||
         s.saceCode.toLowerCase().includes(q) ||
         s.community.toLowerCase().includes(q) ||
         (schoolContacts[s.id]?.directorPhone || '').toLowerCase().includes(q)
     );
-  }, [schools, schoolDistrictFilter, schoolSearch, schoolContacts]);
+  }, [schools, schoolDistrictFilter, schoolCenterTypeFilter, schoolSearch, schoolContacts]);
 
   const filteredReviewAnnuals = useMemo(() => {
     return yearAnnuals.filter((r) => {
       if (reviewLevel !== 'all' && r.level !== reviewLevel) return false;
+      const sch = schools.find((s) => s.id === r.schoolId);
       if (reviewLevel === 'basica' && reviewBasicaScope !== 'all') {
-        const sch = schools.find((s) => s.id === r.schoolId);
         if (getBasicaScope(sch) !== reviewBasicaScope) return false;
+      }
+      if (reviewCenterType !== 'all' && !schoolMatchesCenterTypeFilter(sch, reviewCenterType)) {
+        return false;
       }
       if (reviewStatus !== 'all' && r.status !== reviewStatus) return false;
       return true;
     });
-  }, [yearAnnuals, reviewLevel, reviewBasicaScope, reviewStatus, schools]);
+  }, [yearAnnuals, reviewLevel, reviewBasicaScope, reviewCenterType, reviewStatus, schools]);
 
   const filteredReviewPartes = useMemo(() => {
     return yearPartesMensuales.filter((r) => {
       if (r.month !== reviewMonth) return false;
       if (reviewLevel !== 'all' && r.level !== reviewLevel) return false;
+      const sch = schools.find((s) => s.id === r.schoolId);
       if (reviewLevel === 'basica' && reviewBasicaScope !== 'all') {
-        const sch = schools.find((s) => s.id === r.schoolId);
         if (getBasicaScope(sch) !== reviewBasicaScope) return false;
+      }
+      if (reviewCenterType !== 'all' && !schoolMatchesCenterTypeFilter(sch, reviewCenterType)) {
+        return false;
       }
       if (reviewStatus !== 'all' && r.status !== reviewStatus) return false;
       return true;
     });
-  }, [yearPartesMensuales, reviewMonth, reviewLevel, reviewBasicaScope, reviewStatus, schools]);
+  }, [yearPartesMensuales, reviewMonth, reviewLevel, reviewBasicaScope, reviewCenterType, reviewStatus, schools]);
 
   const filteredReviewMonthlies = useMemo(() => {
     return yearMonthlies.filter((r) => {
       if (r.month !== reviewMonth) return false;
       if (reviewLevel !== 'all' && r.level !== reviewLevel) return false;
+      const sch = schools.find((s) => s.id === r.schoolId);
       if (reviewLevel === 'basica' && reviewBasicaScope !== 'all') {
-        const sch = schools.find((s) => s.id === r.schoolId);
         if (getBasicaScope(sch) !== reviewBasicaScope) return false;
+      }
+      if (reviewCenterType !== 'all' && !schoolMatchesCenterTypeFilter(sch, reviewCenterType)) {
+        return false;
       }
       if (reviewStatus !== 'all' && r.status !== reviewStatus) return false;
       return true;
     });
-  }, [yearMonthlies, reviewMonth, reviewLevel, reviewBasicaScope, reviewStatus, schools]);
+  }, [yearMonthlies, reviewMonth, reviewLevel, reviewBasicaScope, reviewCenterType, reviewStatus, schools]);
 
   // Consolidated computation
   const availableConsSchools = useMemo(() => {
     return schools.filter((s) => {
       if (!s.levels.includes(consLevel)) return false;
       if (consLevel === 'basica' && consBasicaScope !== 'c1_2_3') {
-        return schoolMatchesBasicaScope(s, consBasicaScope);
+        if (!schoolMatchesBasicaScope(s, consBasicaScope)) return false;
+      }
+      if (consCenterType !== 'all' && !schoolMatchesCenterTypeFilter(s, consCenterType)) {
+        return false;
       }
       return true;
     });
-  }, [schools, consLevel, consBasicaScope]);
+  }, [schools, consLevel, consBasicaScope, consCenterType]);
 
   const effectiveConsBasicaScope: BasicaScope | undefined = useMemo(() => {
     if (consLevel !== 'basica') return undefined;
@@ -788,15 +824,18 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
       if (consScope === 'submitted_and_approved' && r.status !== 'approved' && r.status !== 'submitted')
         return false;
       if (consSector !== 'all' && r.sector !== consSector) return false;
+      const sch = schools.find((s) => s.id === r.schoolId);
+      if (consCenterType !== 'all' && !schoolMatchesCenterTypeFilter(sch, consCenterType)) {
+        return false;
+      }
       if (consSchoolId !== 'all') {
         if (r.schoolId !== consSchoolId) return false;
       } else if (consLevel === 'basica' && consBasicaScope !== 'c1_2_3') {
-        const sch = schools.find((s) => s.id === r.schoolId);
         if (sch && !schoolMatchesBasicaScope(sch, consBasicaScope)) return false;
       }
       return true;
     });
-  }, [yearAnnuals, consLevel, consBasicaScope, consScope, consSector, consSchoolId, schools]);
+  }, [yearAnnuals, consLevel, consBasicaScope, consCenterType, consScope, consSector, consSchoolId, schools]);
 
   const consolidatedParteMensualSubset = useMemo(() => {
     return yearPartesMensuales.filter((r) => {
@@ -804,15 +843,18 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
       if (consScope === 'approved_only' && r.status !== 'approved') return false;
       if (consScope === 'submitted_and_approved' && r.status !== 'approved' && r.status !== 'submitted')
         return false;
+      const sch = schools.find((s) => s.id === r.schoolId);
+      if (consCenterType !== 'all' && !schoolMatchesCenterTypeFilter(sch, consCenterType)) {
+        return false;
+      }
       if (consSchoolId !== 'all') {
         if (r.schoolId !== consSchoolId) return false;
       } else if (consLevel === 'basica' && consBasicaScope !== 'c1_2_3') {
-        const sch = schools.find((s) => s.id === r.schoolId);
         if (sch && !schoolMatchesBasicaScope(sch, consBasicaScope)) return false;
       }
       return true;
     });
-  }, [yearPartesMensuales, consMonth, consLevel, consBasicaScope, consScope, consSchoolId, schools]);
+  }, [yearPartesMensuales, consMonth, consLevel, consBasicaScope, consCenterType, consScope, consSchoolId, schools]);
 
   const consolidatedMonthlySubset = useMemo(() => {
     return yearMonthlies.filter((r) => {
@@ -820,15 +862,18 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
       if (consScope === 'approved_only' && r.status !== 'approved') return false;
       if (consScope === 'submitted_and_approved' && r.status !== 'approved' && r.status !== 'submitted')
         return false;
+      const sch = schools.find((s) => s.id === r.schoolId);
+      if (consCenterType !== 'all' && !schoolMatchesCenterTypeFilter(sch, consCenterType)) {
+        return false;
+      }
       if (consSchoolId !== 'all') {
         if (r.schoolId !== consSchoolId) return false;
       } else if (consLevel === 'basica' && consBasicaScope !== 'c1_2_3') {
-        const sch = schools.find((s) => s.id === r.schoolId);
         if (sch && !schoolMatchesBasicaScope(sch, consBasicaScope)) return false;
       }
       return true;
     });
-  }, [yearMonthlies, consMonth, consLevel, consBasicaScope, consScope, consSchoolId, schools]);
+  }, [yearMonthlies, consMonth, consLevel, consBasicaScope, consCenterType, consScope, consSchoolId, schools]);
 
   const consSchoolCount =
     consKind === 'annual'
@@ -847,10 +892,12 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
         };
       }
     }
+    const centerTypeSuffix =
+      consCenterType !== 'all' ? ` · ${getCenterTypeFilterLabel(consCenterType)}` : '';
     return {
       id: 'distrito_18b',
       saceCode: 'DISTRITO 18-B',
-      name: `CONSOLIDADO DISTRITAL N° 18-B, OMOA (${consSchoolCount} centros)`,
+      name: `CONSOLIDADO DISTRITAL N° 18-B, OMOA${centerTypeSuffix} (${consSchoolCount} centros)`,
       community: 'Omoa, Cortés',
       levels: [consLevel],
       ...(effectiveConsBasicaScope ? { basicaScope: effectiveConsBasicaScope } : {}),
@@ -860,7 +907,7 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
       directorDisplayName: 'Dirección Distrital N° 18-B',
       active: true,
     };
-  }, [consSchoolId, schools, consSchoolCount, consLevel, effectiveConsBasicaScope, consSector, profile.uid]);
+  }, [consSchoolId, schools, consSchoolCount, consLevel, effectiveConsBasicaScope, consCenterType, consSector, profile.uid]);
 
   const consolidatedBasicaData: BasicaAnnualData = useMemo(
     () => aggregateBasicaReports(consolidatedAnnualSubset),
@@ -1311,10 +1358,12 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                           .map((l) => getSchoolLevelLabel(l, req.proposedBasicaScope))
                           .join(', ')}{' '}
                         {req.proposedLevels.includes('prebasica') && req.proposedPrebasicaType
-                          ? `· Preescolar: ${req.proposedPrebasicaType} `
+                          ? `· Prebásica: ${normalizePrebasicaCenterType(req.proposedPrebasicaType) || req.proposedPrebasicaType} `
                           : ''}
-                        {req.proposedLevels.includes('basica') && req.proposedBasicaType
-                          ? `· Básica: ${BASICA_CENTER_TYPE_LABELS[req.proposedBasicaType]} `
+                        {req.proposedLevels.includes('basica') &&
+                        req.proposedBasicaScope === 'c1_2' &&
+                        req.proposedBasicaType
+                          ? `· Básica (1° a 6°): ${BASICA_CENTER_TYPE_LABELS[req.proposedBasicaType]} `
                           : ''}
                         ·{' '}
                         {req.requestType === 'new_school'
@@ -1406,6 +1455,17 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                     </option>
                   ))}
                   <option value="unassigned">Sin distrito asignado</option>
+                </select>
+                <select
+                  value={schoolCenterTypeFilter}
+                  onChange={(e) => setSchoolCenterTypeFilter(e.target.value as CenterTypeFilter)}
+                  className="px-2.5 py-1.5 text-xs border border-slate-300 bg-white"
+                >
+                  {CENTER_TYPE_FILTER_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
                 </select>
                 <div className="relative">
                   <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
@@ -1527,11 +1587,13 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                   {newLevels.includes('prebasica') && (
                     <div className="mt-2.5">
                       <label className="block text-[11px] font-medium text-slate-600 mb-1">
-                        Tipo de centro (Preescolar / Prebásica)
+                        Tipo de centro (Prebásica)
                       </label>
                       <select
                         value={newPrebasicaType}
-                        onChange={(e) => setNewPrebasicaType(e.target.value as PrebasicaCenterType)}
+                        onChange={(e) =>
+                          setNewPrebasicaType(e.target.value as CanonicalPrebasicaCenterType)
+                        }
                         className="w-full px-2.5 py-1.5 text-xs border border-slate-300 bg-white"
                       >
                         {PREBASICA_CENTER_TYPES.map((t) => (
@@ -1560,19 +1622,26 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                           ))}
                         </select>
                       </div>
-                      <div>
-                        <label className="block text-[11px] font-medium text-slate-600 mb-1">
-                          Tipo de centro (Básica)
-                        </label>
-                        <select
-                          value={newBasicaType}
-                          onChange={(e) => setNewBasicaType(e.target.value as BasicaCenterType)}
-                          className="w-full px-2.5 py-1.5 text-xs border border-slate-300 bg-white"
-                        >
-                          <option value="gubernamental">Gubernamental</option>
-                          <option value="proheco">PROHECO</option>
-                        </select>
-                      </div>
+                      {newBasicaScope === 'c1_2' && (
+                        <div>
+                          <label className="block text-[11px] font-medium text-slate-600 mb-1">
+                            Tipo de centro (Básica de 1° a 6° grado)
+                          </label>
+                          <select
+                            value={newBasicaType}
+                            onChange={(e) =>
+                              setNewBasicaType(e.target.value as CanonicalBasicaCenterType)
+                            }
+                            className="w-full px-2.5 py-1.5 text-xs border border-slate-300 bg-white"
+                          >
+                            {BASICA_CENTER_TYPES.map((t) => (
+                              <option key={t} value={t}>
+                                {BASICA_CENTER_TYPE_LABELS[t]}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1722,11 +1791,13 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                   {editLevels.includes('prebasica') && (
                     <div className="mt-2.5">
                       <label className="block text-[11px] font-medium text-slate-600 mb-1">
-                        Tipo de centro (Preescolar / Prebásica)
+                        Tipo de centro (Prebásica)
                       </label>
                       <select
                         value={editPrebasicaType}
-                        onChange={(e) => setEditPrebasicaType(e.target.value as PrebasicaCenterType)}
+                        onChange={(e) =>
+                          setEditPrebasicaType(e.target.value as CanonicalPrebasicaCenterType)
+                        }
                         className="w-full px-2.5 py-1.5 text-xs border border-slate-300 bg-white"
                       >
                         {PREBASICA_CENTER_TYPES.map((t) => (
@@ -1755,19 +1826,26 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                           ))}
                         </select>
                       </div>
-                      <div>
-                        <label className="block text-[11px] font-medium text-slate-600 mb-1">
-                          Tipo de centro (Básica)
-                        </label>
-                        <select
-                          value={editBasicaType}
-                          onChange={(e) => setEditBasicaType(e.target.value as BasicaCenterType)}
-                          className="w-full px-2.5 py-1.5 text-xs border border-slate-300 bg-white"
-                        >
-                          <option value="gubernamental">Gubernamental</option>
-                          <option value="proheco">PROHECO</option>
-                        </select>
-                      </div>
+                      {editBasicaScope === 'c1_2' && (
+                        <div>
+                          <label className="block text-[11px] font-medium text-slate-600 mb-1">
+                            Tipo de centro (Básica de 1° a 6° grado)
+                          </label>
+                          <select
+                            value={editBasicaType}
+                            onChange={(e) =>
+                              setEditBasicaType(e.target.value as CanonicalBasicaCenterType)
+                            }
+                            className="w-full px-2.5 py-1.5 text-xs border border-slate-300 bg-white"
+                          >
+                            {BASICA_CENTER_TYPES.map((t) => (
+                              <option key={t} value={t}>
+                                {BASICA_CENTER_TYPE_LABELS[t]}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1957,6 +2035,13 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                   const lvl = e.target.value as 'all' | EducationLevel;
                   setReviewLevel(lvl);
                   if (lvl !== 'basica') setReviewBasicaScope('all');
+                  if (lvl === 'media') {
+                    setReviewCenterType('all');
+                  } else if (lvl === 'prebasica' && reviewCenterType.startsWith('basica:')) {
+                    setReviewCenterType('all');
+                  } else if (lvl === 'basica' && reviewCenterType.startsWith('prebasica:')) {
+                    setReviewCenterType('all');
+                  }
                 }}
                 className="px-2.5 py-1.5 border border-slate-300 bg-white"
               >
@@ -1968,7 +2053,13 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
               {reviewLevel === 'basica' && (
                 <select
                   value={reviewBasicaScope}
-                  onChange={(e) => setReviewBasicaScope(e.target.value as 'all' | BasicaScope)}
+                  onChange={(e) => {
+                    const sc = e.target.value as 'all' | BasicaScope;
+                    setReviewBasicaScope(sc);
+                    if (sc === 'c3' || sc === 'c1_2_3') {
+                      setReviewCenterType('all');
+                    }
+                  }}
                   className="px-2.5 py-1.5 border border-slate-300 bg-white"
                 >
                   <option value="all">Todos los subniveles de Básica</option>
@@ -1979,6 +2070,25 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                   ))}
                 </select>
               )}
+              {reviewLevel !== 'media' &&
+                !(reviewLevel === 'basica' && (reviewBasicaScope === 'c3' || reviewBasicaScope === 'c1_2_3')) && (
+                  <select
+                    value={reviewCenterType}
+                    onChange={(e) => setReviewCenterType(e.target.value as CenterTypeFilter)}
+                    className="px-2.5 py-1.5 border border-slate-300 bg-white"
+                  >
+                    {CENTER_TYPE_FILTER_OPTIONS.filter((opt) => {
+                      if (opt.value === 'all') return true;
+                      if (reviewLevel === 'prebasica') return opt.value.startsWith('prebasica:');
+                      if (reviewLevel === 'basica') return opt.value.startsWith('basica:');
+                      return true;
+                    }).map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                )}
               <select
                 value={reviewStatus}
                 onChange={(e) => setReviewStatus(e.target.value as 'all' | ReportStatus)}
@@ -2255,37 +2365,43 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                       </td>
                     </tr>
                   ) : (
-                    filteredReviewAnnuals.map((rep) => (
-                      <tr key={rep.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-2.5 font-mono">{rep.saceCode}</td>
-                        <td className="px-4 py-2.5 font-medium text-slate-900">{rep.schoolName}</td>
-                        <td className="px-4 py-2.5">
-                          {getSchoolLevelLabel(
-                            rep.level,
-                            schools.find((s) => s.id === rep.schoolId)
-                          )}
-                        </td>
-                        <td className="px-4 py-2.5 text-slate-600">{rep.directorName}</td>
-                        <td className="px-4 py-2.5">
-                          <StatusText status={rep.status} />
-                        </td>
-                        <td className="px-4 py-2.5 text-right">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setInspectingAnnual(rep);
-                              setInspectingParteMensual(null);
-                              setInspectingMonthly(null);
-                              setReturnComment(rep.reviewComment || '');
-                            }}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 border border-blue-200 bg-blue-50 hover:bg-blue-100 cursor-pointer whitespace-nowrap"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                            Inspeccionar
-                          </button>
-                        </td>
-                      </tr>
-                    ))
+                    filteredReviewAnnuals.map((rep) => {
+                      const sch = schools.find((s) => s.id === rep.schoolId);
+                      const typeSummary = sch ? getSchoolCenterTypesSummary(sch) : '';
+                      return (
+                        <tr key={rep.id} className="hover:bg-slate-50">
+                          <td className="px-4 py-2.5 font-mono">{rep.saceCode}</td>
+                          <td className="px-4 py-2.5">
+                            <p className="font-medium text-slate-900">{rep.schoolName}</p>
+                            {typeSummary && (
+                              <p className="text-[11px] text-slate-500">{typeSummary}</p>
+                            )}
+                          </td>
+                          <td className="px-4 py-2.5">
+                            {getSchoolLevelLabel(rep.level, sch)}
+                          </td>
+                          <td className="px-4 py-2.5 text-slate-600">{rep.directorName}</td>
+                          <td className="px-4 py-2.5">
+                            <StatusText status={rep.status} />
+                          </td>
+                          <td className="px-4 py-2.5 text-right">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setInspectingAnnual(rep);
+                                setInspectingParteMensual(null);
+                                setInspectingMonthly(null);
+                                setReturnComment(rep.reviewComment || '');
+                              }}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 border border-blue-200 bg-blue-50 hover:bg-blue-100 cursor-pointer whitespace-nowrap"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              Inspeccionar
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )
                 ) : reviewKind === 'parteMensual' ? (
                   filteredReviewPartes.length === 0 ? (
@@ -2295,37 +2411,43 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                       </td>
                     </tr>
                   ) : (
-                    filteredReviewPartes.map((rep) => (
-                      <tr key={rep.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-2.5 font-mono">{rep.saceCode}</td>
-                        <td className="px-4 py-2.5 font-medium text-slate-900">{rep.schoolName}</td>
-                        <td className="px-4 py-2.5">
-                          {getSchoolLevelLabel(
-                            rep.level,
-                            schools.find((s) => s.id === rep.schoolId)
-                          )}
-                        </td>
-                        <td className="px-4 py-2.5 text-slate-600">{rep.directorName}</td>
-                        <td className="px-4 py-2.5">
-                          <StatusText status={rep.status} />
-                        </td>
-                        <td className="px-4 py-2.5 text-right">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setInspectingParteMensual(rep);
-                              setInspectingAnnual(null);
-                              setInspectingMonthly(null);
-                              setReturnComment(rep.reviewComment || '');
-                            }}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 border border-blue-200 bg-blue-50 hover:bg-blue-100 cursor-pointer whitespace-nowrap"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                            Inspeccionar
-                          </button>
-                        </td>
-                      </tr>
-                    ))
+                    filteredReviewPartes.map((rep) => {
+                      const sch = schools.find((s) => s.id === rep.schoolId);
+                      const typeSummary = sch ? getSchoolCenterTypesSummary(sch) : '';
+                      return (
+                        <tr key={rep.id} className="hover:bg-slate-50">
+                          <td className="px-4 py-2.5 font-mono">{rep.saceCode}</td>
+                          <td className="px-4 py-2.5">
+                            <p className="font-medium text-slate-900">{rep.schoolName}</p>
+                            {typeSummary && (
+                              <p className="text-[11px] text-slate-500">{typeSummary}</p>
+                            )}
+                          </td>
+                          <td className="px-4 py-2.5">
+                            {getSchoolLevelLabel(rep.level, sch)}
+                          </td>
+                          <td className="px-4 py-2.5 text-slate-600">{rep.directorName}</td>
+                          <td className="px-4 py-2.5">
+                            <StatusText status={rep.status} />
+                          </td>
+                          <td className="px-4 py-2.5 text-right">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setInspectingParteMensual(rep);
+                                setInspectingAnnual(null);
+                                setInspectingMonthly(null);
+                                setReturnComment(rep.reviewComment || '');
+                              }}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 border border-blue-200 bg-blue-50 hover:bg-blue-100 cursor-pointer whitespace-nowrap"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              Inspeccionar
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )
                 ) : filteredReviewMonthlies.length === 0 ? (
                   <tr>
@@ -2334,15 +2456,20 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                     </td>
                   </tr>
                 ) : (
-                  filteredReviewMonthlies.map((rep) => (
+                  filteredReviewMonthlies.map((rep) => {
+                    const sch = schools.find((s) => s.id === rep.schoolId);
+                    const typeSummary = sch ? getSchoolCenterTypesSummary(sch) : '';
+                    return (
                     <tr key={rep.id} className="hover:bg-slate-50">
                       <td className="px-4 py-2.5 font-mono">{rep.saceCode}</td>
-                      <td className="px-4 py-2.5 font-medium text-slate-900">{rep.schoolName}</td>
                       <td className="px-4 py-2.5">
-                        {getSchoolLevelLabel(
-                          rep.level,
-                          schools.find((s) => s.id === rep.schoolId)
+                        <p className="font-medium text-slate-900">{rep.schoolName}</p>
+                        {typeSummary && (
+                          <p className="text-[11px] text-slate-500">{typeSummary}</p>
                         )}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        {getSchoolLevelLabel(rep.level, sch)}
                       </td>
                       <td className="px-4 py-2.5 text-slate-600">{rep.directorName}</td>
                       <td className="px-4 py-2.5">
@@ -2371,7 +2498,8 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                         </button>
                       </td>
                     </tr>
-                  ))
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -2456,7 +2584,9 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                 <select
                   value={consLevel}
                   onChange={(e) => {
-                    setConsLevel(e.target.value as EducationLevel);
+                    const nextLevel = e.target.value as EducationLevel;
+                    setConsLevel(nextLevel);
+                    setConsCenterType('all');
                     setConsSchoolId('all');
                   }}
                   className="w-full px-2.5 py-2 border border-slate-300 bg-white"
@@ -2475,13 +2605,44 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                   <select
                     value={consBasicaScope}
                     onChange={(e) => {
-                      setConsBasicaScope(e.target.value as BasicaScope);
+                      const nextScope = e.target.value as BasicaScope;
+                      setConsBasicaScope(nextScope);
+                      if (nextScope !== 'c1_2') setConsCenterType('all');
                       setConsSchoolId('all');
                     }}
                     className="w-full px-2.5 py-2 border border-slate-300 bg-white"
                   >
                     <option value="c1_2">Básica de 1° a 6° (I y II Ciclo)</option>
                     <option value="c1_2_3">Básica de 1° a 9° (I, II y III Ciclo)</option>
+                  </select>
+                </div>
+              )}
+
+              {(consLevel === 'prebasica' ||
+                (consLevel === 'basica' && consBasicaScope === 'c1_2')) && (
+                <div>
+                  <label className="block font-medium text-slate-700 mb-1">
+                    Tipo de centro
+                  </label>
+                  <select
+                    value={consCenterType}
+                    onChange={(e) => {
+                      setConsCenterType(e.target.value as CenterTypeFilter);
+                      setConsSchoolId('all');
+                    }}
+                    className="w-full px-2.5 py-2 border border-slate-300 bg-white"
+                  >
+                    {CENTER_TYPE_FILTER_OPTIONS.filter((opt) => {
+                      if (opt.value === 'all') return true;
+                      if (consLevel === 'prebasica') return opt.value.startsWith('prebasica:');
+                      return opt.value.startsWith('basica:');
+                    }).map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.value === 'all'
+                          ? 'Todos los tipos'
+                          : opt.label.replace(/^Prebásica · |^Básica \(1° a 6°\) · /, '')}
+                      </option>
+                    ))}
                   </select>
                 </div>
               )}
