@@ -108,10 +108,13 @@ import { MonthlyComplianceWidget } from './MonthlyComplianceWidget';
 import { MovimientosSaceEditor } from './MovimientosSaceEditor';
 import { ParteMensualEditor } from './ParteMensualEditor';
 import { PrebasicaAnnualEditor } from './PrebasicaAnnualEditor';
+import { ReportComplianceByLevelChart } from './ReportComplianceByLevelChart';
+import { StatisticalReportsExplorer } from './StatisticalReportsExplorer';
 import { StatusText } from './StatusText';
 
 export type AdminSection =
   | 'overview'
+  | 'statisticalReports'
   | 'schools'
   | 'users'
   | 'reviews'
@@ -1254,6 +1257,15 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
       {/* SECTION 1: OVERVIEW */}
       {activeSection === 'overview' && (
         <div className="space-y-6">
+          <ReportComplianceByLevelChart
+            year={year}
+            schools={schools}
+            parteMensualReports={parteMensualReports}
+            monthlyReports={monthlyReports}
+            annualReports={annualReports}
+            onOpenReviews={() => onSectionChange?.('reviews')}
+          />
+
           <ActivityComplianceChart
             year={year}
             schools={schools}
@@ -1399,6 +1411,43 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
             </div>
           </div>
         </div>
+      )}
+
+      {/* SECTION 1.5: STATISTICAL REPORTS EXPLORER */}
+      {activeSection === 'statisticalReports' && (
+        <StatisticalReportsExplorer
+          year={year}
+          schools={schools}
+          parteMensualReports={parteMensualReports}
+          monthlyReports={monthlyReports}
+          annualReports={annualReports}
+          onInspectParteMensual={(rep) => {
+            setReviewKind('parteMensual');
+            setReviewMonth(rep.month);
+            setInspectingParteMensual(rep);
+            setInspectingMonthly(null);
+            setInspectingAnnual(null);
+            setReturnComment(rep.reviewComment || '');
+            onSectionChange?.('reviews');
+          }}
+          onInspectMonthly={(rep) => {
+            setReviewKind('monthly');
+            setReviewMonth(rep.month);
+            setInspectingMonthly(rep);
+            setInspectingParteMensual(null);
+            setInspectingAnnual(null);
+            setReturnComment(rep.reviewComment || '');
+            onSectionChange?.('reviews');
+          }}
+          onInspectAnnual={(rep) => {
+            setReviewKind('annual');
+            setInspectingAnnual(rep);
+            setInspectingParteMensual(null);
+            setInspectingMonthly(null);
+            setReturnComment(rep.reviewComment || '');
+            onSectionChange?.('reviews');
+          }}
+        />
       )}
 
       {/* SECTION 2: SCHOOLS & DIRECTORS */}

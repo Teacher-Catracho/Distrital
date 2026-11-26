@@ -1486,3 +1486,283 @@ export async function exportParteMensualExcel(
   );
 }
 
+export interface StatisticalExplorerExcelRow {
+  label: string;
+  secondaryLabel?: string;
+  thirdLabel?: string;
+  schoolsCount?: number;
+  reportsCount?: number;
+  matInicialN: number;
+  matInicialV: number;
+  ingresosN: number;
+  ingresosV: number;
+  trasladosN: number;
+  trasladosV: number;
+  desertoresN: number;
+  desertoresV: number;
+  matFinalN: number;
+  matFinalV: number;
+  aprobadosN?: number;
+  aprobadosV?: number;
+  reprobadosN?: number;
+  reprobadosV?: number;
+  egresadosN?: number;
+  egresadosV?: number;
+  ratePct?: number;
+}
+
+export async function exportStatisticalExplorerExcel(params: {
+  year: number;
+  sourceLabel: string;
+  periodLabel: string;
+  filterSummary: string;
+  includeAnnualOutcomeCols: boolean;
+  rateColumnLabel: string;
+  gradeRows: StatisticalExplorerExcelRow[];
+  centerTypeRows: StatisticalExplorerExcelRow[];
+  schoolRows: StatisticalExplorerExcelRow[];
+}) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'SEDI — Sistema de Estadística Distrital';
+
+  const writeTableSheet = (
+    sheetName: string,
+    title: string,
+    firstColHeader: string,
+    extraCols: { header: string; getValue: (r: StatisticalExplorerExcelRow) => string | number }[],
+    rows: StatisticalExplorerExcelRow[]
+  ) => {
+    const sheet = workbook.addWorksheet(sheetName);
+    const baseColHeaders = [
+      'Mat. Inicial (N)',
+      'Mat. Inicial (V)',
+      'Mat. Inicial (T)',
+      'Ingresos (N)',
+      'Ingresos (V)',
+      'Ingresos (T)',
+      'Traslados (N)',
+      'Traslados (V)',
+      'Traslados (T)',
+      'Desertores (N)',
+      'Desertores (V)',
+      'Desertores (T)',
+      'Mat. Final (N)',
+      'Mat. Final (V)',
+      'Mat. Final (T)',
+    ];
+    const outcomeHeaders = params.includeAnnualOutcomeCols
+      ? [
+          'Aprobados (N)',
+          'Aprobados (V)',
+          'Aprobados (T)',
+          'Reprobados (N)',
+          'Reprobados (V)',
+          'Reprobados (T)',
+          'Egresados (T)',
+        ]
+      : [];
+    const headers = [
+      firstColHeader,
+      ...extraCols.map((c) => c.header),
+      ...baseColHeaders,
+      ...outcomeHeaders,
+      params.rateColumnLabel,
+    ];
+    const totalCols = headers.length;
+
+    sheet.mergeCells(1, 1, 1, totalCols);
+    sheet.getCell(1, 1).value =
+      'GOBIERNO DE LA REPÚBLICA DE HONDURAS · SECRETARÍA DE EDUCACIÓN · DISTRITO 18-B OMOA';
+    sheet.getCell(1, 1).font = { name: 'Calibri', size: 11, bold: true };
+    sheet.getCell(1, 1).alignment = { horizontal: 'center', vertical: 'middle' };
+
+    sheet.mergeCells(2, 1, 2, totalCols);
+    sheet.getCell(2, 1).value = `${title} · ${params.sourceLabel} (${params.periodLabel})`;
+    sheet.getCell(2, 1).font = { name: 'Calibri', size: 10.5, bold: true };
+    sheet.getCell(2, 1).alignment = { horizontal: 'center', vertical: 'middle' };
+
+    sheet.mergeCells(3, 1, 3, totalCols);
+    sheet.getCell(3, 1).value = `Filtros aplicados: ${params.filterSummary}`;
+    sheet.getCell(3, 1).font = { name: 'Calibri', size: 9.5, italic: true };
+    sheet.getCell(3, 1).alignment = { horizontal: 'left', vertical: 'middle' };
+
+    const headerRowIdx = 5;
+    sheet.getRow(headerRowIdx).height = 26;
+    headers.forEach((h, idx) => {
+      const cell = sheet.getCell(headerRowIdx, idx + 1);
+      cell.value = h;
+      styleCell(cell, {
+        bold: true,
+        fill: SUBHEADER_FILL_BLUE,
+        align: idx <= extraCols.length ? 'left' : 'center',
+        size: 9,
+      });
+    });
+
+    const sum = {
+      matInicialN: 0,
+      matInicialV: 0,
+      ingresosN: 0,
+      ingresosV: 0,
+      trasladosN: 0,
+      trasladosV: 0,
+      desertoresN: 0,
+      desertoresV: 0,
+      matFinalN: 0,
+      matFinalV: 0,
+      aprobadosN: 0,
+      aprobadosV: 0,
+      reprobadosN: 0,
+      reprobadosV: 0,
+      egresadosN: 0,
+      egresadosV: 0,
+    };
+
+    const writeDataRow = (rowIdx: number, r: StatisticalExplorerExcelRow, isTotal = false) => {
+      const fill = isTotal ? TOTAL_FILL_YELLOW : undefined;
+      let col = 1;
+      sheet.getCell(rowIdx, col).value = r.label;
+      styleCell(sheet.getCell(rowIdx, col), { bold: isTotal, fill, align: 'left' });
+      col++;
+
+      for (const ec of extraCols) {
+        const val = ec.getValue(r);
+        sheet.getCell(rowIdx, col).value = isTotal && typeof val === 'string' ? '—' : val;
+        styleCell(sheet.getCell(rowIdx, col), {
+          bold: isTotal,
+          fill,
+          align: typeof val === 'number' ? 'right' : 'left',
+          numFmt: typeof val === 'number' ? '#,##0' : undefined,
+        });
+        col++;
+      }
+
+      const writeTriplet = (n: number, v: number) => {
+        const t = n + v;
+        [n, v, t].forEach((val, idx) => {
+          sheet.getCell(rowIdx, col).value = val;
+          styleCell(sheet.getCell(rowIdx, col), {
+            bold: isTotal || idx === 2,
+            fill,
+            align: 'right',
+            numFmt: '#,##0',
+          });
+          col++;
+        });
+      };
+
+      writeTriplet(r.matInicialN, r.matInicialV);
+      writeTriplet(r.ingresosN, r.ingresosV);
+      writeTriplet(r.trasladosN, r.trasladosV);
+      writeTriplet(r.desertoresN, r.desertoresV);
+      writeTriplet(r.matFinalN, r.matFinalV);
+
+      if (params.includeAnnualOutcomeCols) {
+        writeTriplet(r.aprobadosN || 0, r.aprobadosV || 0);
+        writeTriplet(r.reprobadosN || 0, r.reprobadosV || 0);
+        sheet.getCell(rowIdx, col).value = (r.egresadosN || 0) + (r.egresadosV || 0);
+        styleCell(sheet.getCell(rowIdx, col), {
+          bold: isTotal,
+          fill,
+          align: 'right',
+          numFmt: '#,##0',
+        });
+        col++;
+      }
+
+      sheet.getCell(rowIdx, col).value =
+        r.ratePct !== undefined ? Number(r.ratePct.toFixed(1)) : 0;
+      styleCell(sheet.getCell(rowIdx, col), {
+        bold: isTotal,
+        fill,
+        align: 'right',
+        numFmt: '0.0"%"',
+      });
+    };
+
+    rows.forEach((r, idx) => {
+      sum.matInicialN += r.matInicialN;
+      sum.matInicialV += r.matInicialV;
+      sum.ingresosN += r.ingresosN;
+      sum.ingresosV += r.ingresosV;
+      sum.trasladosN += r.trasladosN;
+      sum.trasladosV += r.trasladosV;
+      sum.desertoresN += r.desertoresN;
+      sum.desertoresV += r.desertoresV;
+      sum.matFinalN += r.matFinalN;
+      sum.matFinalV += r.matFinalV;
+      sum.aprobadosN += r.aprobadosN || 0;
+      sum.aprobadosV += r.aprobadosV || 0;
+      sum.reprobadosN += r.reprobadosN || 0;
+      sum.reprobadosV += r.reprobadosV || 0;
+      sum.egresadosN += r.egresadosN || 0;
+      sum.egresadosV += r.egresadosV || 0;
+      writeDataRow(headerRowIdx + 1 + idx, r, false);
+    });
+
+    const totalAprob = sum.aprobadosN + sum.aprobadosV;
+    const totalReprob = sum.reprobadosN + sum.reprobadosV;
+    const avgRate = params.includeAnnualOutcomeCols
+      ? totalAprob + totalReprob > 0
+        ? (totalAprob / (totalAprob + totalReprob)) * 100
+        : 0
+      : rows.length > 0
+      ? rows.reduce((s, r) => s + (r.ratePct || 0), 0) / rows.length
+      : 0;
+
+    writeDataRow(
+      headerRowIdx + 1 + rows.length,
+      {
+        label: 'TOTAL GENERAL',
+        ...sum,
+        ratePct: avgRate,
+      },
+      true
+    );
+
+    sheet.getColumn(1).width = 28;
+    extraCols.forEach((_, i) => {
+      sheet.getColumn(2 + i).width = 18;
+    });
+    for (let c = 2 + extraCols.length; c <= totalCols; c++) {
+      sheet.getColumn(c).width = 11;
+    }
+  };
+
+  writeTableSheet(
+    'Por Grado',
+    'REPORTE ESTADÍSTICO POR GRADO',
+    'Grado',
+    [
+      { header: 'Nivel', getValue: (r) => r.secondaryLabel || '' },
+      { header: 'Reportes', getValue: (r) => r.reportsCount || 0 },
+    ],
+    params.gradeRows
+  );
+
+  writeTableSheet(
+    'Por Nivel y Tipo',
+    'REPORTE ESTADÍSTICO POR NIVEL Y TIPO DE CENTRO',
+    'Nivel / Tipo de Centro',
+    [
+      { header: 'Centros', getValue: (r) => r.schoolsCount || 0 },
+      { header: 'Reportes', getValue: (r) => r.reportsCount || 0 },
+    ],
+    params.centerTypeRows
+  );
+
+  writeTableSheet(
+    'Por Centro',
+    'REPORTE ESTADÍSTICO POR CENTRO EDUCATIVO',
+    'Centro Educativo',
+    [
+      { header: 'Código SACE', getValue: (r) => r.secondaryLabel || '' },
+      { header: 'Nivel / Tipo', getValue: (r) => r.thirdLabel || '' },
+    ],
+    params.schoolRows
+  );
+
+  downloadWorkbook(workbook, `Reportes_Estadisticos_Distrito_18B_${params.year}.xlsx`);
+}
+
+

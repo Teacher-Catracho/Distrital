@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+  BarChart3,
   Building2,
   Calendar,
   ClipboardCheck,
@@ -57,6 +58,7 @@ function MainShell() {
 
   const adminNav: { key: AdminSection; label: string; icon: typeof LayoutDashboard }[] = [
     { key: 'overview', label: 'Tablero Distrital', icon: LayoutDashboard },
+    { key: 'statisticalReports', label: 'Reportes estadísticos', icon: BarChart3 },
     { key: 'schools', label: 'Centros y Directores', icon: Building2 },
     { key: 'users', label: 'Usuarios y Asistentes', icon: Users },
     { key: 'reviews', label: 'Revisión de Reportes', icon: ClipboardCheck },
