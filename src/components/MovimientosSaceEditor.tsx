@@ -31,6 +31,7 @@ interface MovimientosSaceEditorProps {
   school: School;
   profile: UserProfile;
   readOnly?: boolean;
+  reviewMode?: boolean;
   onAfterSave?: () => void;
 }
 
@@ -53,6 +54,7 @@ export function MovimientosSaceEditor({
   school,
   profile,
   readOnly = false,
+  reviewMode = false,
   onAfterSave,
 }: MovimientosSaceEditorProps) {
   const monthLabel = MONTHS.find((m) => m.value === month)?.label || String(month);
@@ -109,7 +111,9 @@ export function MovimientosSaceEditor({
     };
   }, [reportId]);
 
-  const isLocked = readOnly || (profile.role !== 'admin' && (status === 'approved' || status === 'submitted'));
+  const isAdminActor =
+    profile.role === 'admin' || profile.adminPosition === 'asistente_tecnico';
+  const isLocked = readOnly || (!isAdminActor && (status === 'approved' || status === 'submitted'));
   const totalMovements = ingresos.length + traslados.length + desertores.length;
 
   const buildReportObject = (targetStatus: ReportStatus): MonthlyReport => ({
@@ -166,7 +170,7 @@ export function MovimientosSaceEditor({
   };
 
   const handleSave = async (
-    targetStatus: 'draft' | 'submitted' | 'approved',
+    targetStatus: ReportStatus,
     options?: { forceNoMovements?: boolean }
   ) => {
     setFeedback(null);
@@ -186,30 +190,36 @@ export function MovimientosSaceEditor({
     const finalIngresos = effectiveNoMovements ? [] : cleanRows(ingresos);
     const finalTraslados = effectiveNoMovements ? [] : cleanRows(traslados);
     const finalDesertores = effectiveNoMovements ? [] : cleanRows(desertores);
+    const totalCleanRows =
+      finalIngresos.length + finalTraslados.length + finalDesertores.length;
 
-    if (targetStatus === 'submitted' || targetStatus === 'approved') {
-      if (
-        !effectiveNoMovements &&
-        finalIngresos.length + finalTraslados.length + finalDesertores.length === 0
-      ) {
+    const enforceStrictChecks =
+      targetStatus === 'approved' || (!reviewMode && targetStatus === 'submitted');
+
+    if (enforceStrictChecks) {
+      if (!effectiveNoMovements && totalCleanRows === 0) {
         setFeedback({
           type: 'err',
           text: 'No hay movimientos registrados. Si este mes no hubo ingresos, traslados ni desertores, marca "Reportar mes sin movimientos SACE" o presiona "Enviar sin movimientos SACE".',
         });
         return;
       }
+    }
 
-      if (!effectiveNoMovements) {
-        const invalidRow = [...finalIngresos, ...finalTraslados, ...finalDesertores].find(
-          (r) => !r.nombre || !r.gradoSeccion
-        );
-        if (invalidRow) {
-          setFeedback({
-            type: 'err',
-            text: 'Completa el Nombre y Grado/Sección en todas las filas registradas antes de enviar o aprobar.',
-          });
-          return;
-        }
+    if (
+      !effectiveNoMovements &&
+      totalCleanRows > 0 &&
+      (targetStatus === 'submitted' || targetStatus === 'approved')
+    ) {
+      const invalidRow = [...finalIngresos, ...finalTraslados, ...finalDesertores].find(
+        (r) => !r.nombre || !r.gradoSeccion
+      );
+      if (invalidRow) {
+        setFeedback({
+          type: 'err',
+          text: 'Completa el Nombre y Grado/Sección en todas las filas registradas antes de guardar, enviar o aprobar.',
+        });
+        return;
       }
     }
 
@@ -222,11 +232,11 @@ export function MovimientosSaceEditor({
         school.directorUid && /^[a-zA-Z0-9_-]{1,128}$/.test(school.directorUid)
           ? school.directorUid
           : '';
-      const resolvedDirectorName = school.directorDisplayName || profile.displayName;
-      const isAdminActor = profile.role === 'admin';
 
       if (existing.exists()) {
         const existingData = existing.data() as MonthlyReport;
+        const resolvedDirectorName =
+          school.directorDisplayName || existingData.directorName || profile.displayName;
         await updateDoc(ref, {
           schoolName: school.name,
           saceCode: school.saceCode,
@@ -239,13 +249,22 @@ export function MovimientosSaceEditor({
           ...(isAdminActor
             ? {
                 directorUid: validSchoolDirectorUid || existingData.directorUid || profile.uid,
-                reviewedByUid: targetStatus === 'approved' ? profile.uid : '',
-                reviewComment: targetStatus === 'approved' || targetStatus === 'submitted' ? '' : existingData.reviewComment || '',
+                reviewedByUid:
+                  targetStatus === 'approved'
+                    ? profile.uid
+                    : targetStatus === 'returned'
+                    ? existingData.reviewedByUid || profile.uid
+                    : '',
+                reviewComment:
+                  targetStatus === 'approved' || targetStatus === 'submitted'
+                    ? ''
+                    : existingData.reviewComment || '',
               }
             : {}),
           updatedAt: serverTimestamp(),
         });
       } else {
+        const resolvedDirectorName = school.directorDisplayName || profile.displayName;
         await setDoc(ref, {
           year,
           month,
@@ -284,6 +303,8 @@ export function MovimientosSaceEditor({
             ? effectiveNoMovements
               ? 'Reporte mensual sin movimientos SACE guardado y aprobado oficialmente.'
               : 'Reporte mensual guardado y aprobado oficialmente.'
+            : reviewMode
+            ? 'Cambios guardados correctamente en el reporte mensual.'
             : targetStatus === 'submitted'
             ? effectiveNoMovements
               ? 'Reporte mensual sin movimientos SACE enviado al Distrito Educativo N° 18-B.'
@@ -570,34 +591,61 @@ export function MovimientosSaceEditor({
 
           {!isLocked && (
             <>
-              <button
-                type="button"
-                disabled={saving}
-                onClick={() => handleSave('draft')}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 cursor-pointer whitespace-nowrap disabled:opacity-50"
-              >
-                <Save className="w-3.5 h-3.5" />
-                Guardar borrador
-              </button>
-              <button
-                type="button"
-                disabled={saving}
-                onClick={() => handleSave('submitted')}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-blue-700 hover:bg-blue-800 text-white cursor-pointer whitespace-nowrap disabled:opacity-50"
-              >
-                <Send className="w-3.5 h-3.5" />
-                Enviar al Distrito
-              </button>
-              {profile.role === 'admin' && (
-                <button
-                  type="button"
-                  disabled={saving}
-                  onClick={() => handleSave('approved')}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer whitespace-nowrap disabled:opacity-50"
-                >
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  Guardar y aprobar
-                </button>
+              {reviewMode ? (
+                <>
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => handleSave(status)}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-blue-700 hover:bg-blue-800 text-white cursor-pointer whitespace-nowrap disabled:opacity-50"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    Guardar cambios
+                  </button>
+                  {isAdminActor && status !== 'approved' && (
+                    <button
+                      type="button"
+                      disabled={saving}
+                      onClick={() => handleSave('approved')}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer whitespace-nowrap disabled:opacity-50"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      Guardar y aprobar
+                    </button>
+                  )}
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => handleSave('draft')}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 cursor-pointer whitespace-nowrap disabled:opacity-50"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    Guardar borrador
+                  </button>
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => handleSave('submitted')}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-blue-700 hover:bg-blue-800 text-white cursor-pointer whitespace-nowrap disabled:opacity-50"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    Enviar al Distrito
+                  </button>
+                  {isAdminActor && (
+                    <button
+                      type="button"
+                      disabled={saving}
+                      onClick={() => handleSave('approved')}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer whitespace-nowrap disabled:opacity-50"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      Guardar y aprobar
+                    </button>
+                  )}
+                </>
               )}
             </>
           )}
@@ -667,7 +715,7 @@ export function MovimientosSaceEditor({
               </span>
             </label>
 
-            {!noMovements && totalMovements === 0 && (
+            {!reviewMode && !noMovements && totalMovements === 0 && (
               <button
                 type="button"
                 disabled={saving}

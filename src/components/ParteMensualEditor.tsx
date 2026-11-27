@@ -47,6 +47,7 @@ interface ParteMensualEditorProps {
   school: School;
   profile: UserProfile;
   readOnly?: boolean;
+  reviewMode?: boolean;
   isConsolidated?: boolean;
   externalAggregate?: {
     byGrade: Record<string, ParteMensualComputedRow>;
@@ -64,6 +65,7 @@ export function ParteMensualEditor({
   school,
   profile,
   readOnly = false,
+  reviewMode = false,
   isConsolidated = false,
   externalAggregate,
   onAfterSave,
@@ -148,10 +150,12 @@ export function ParteMensualEditor({
     };
   }, [reportId, level, effectiveBasicaScope, school.community, school.directorDisplayName, profile.displayName, externalAggregate]);
 
+  const isAdminActor =
+    profile.role === 'admin' || profile.adminPosition === 'asistente_tecnico';
   const isLocked =
     readOnly ||
     Boolean(externalAggregate) ||
-    (profile.role !== 'admin' && (status === 'approved' || status === 'submitted'));
+    (!isAdminActor && (status === 'approved' || status === 'submitted'));
 
   const computedByGrade = useMemo(() => {
     if (externalAggregate) return externalAggregate.byGrade;
@@ -244,7 +248,7 @@ export function ParteMensualEditor({
     }
   };
 
-  const handleSave = async (targetStatus: 'draft' | 'submitted' | 'approved') => {
+  const handleSave = async (targetStatus: ReportStatus) => {
     if (diasTrabajados < 0 || diasTrabajados > 31) {
       setFeedback({
         type: 'err',
@@ -253,7 +257,10 @@ export function ParteMensualEditor({
       return;
     }
 
-    if ((targetStatus === 'submitted' || targetStatus === 'approved') && diasTrabajados <= 0) {
+    const enforceStrictChecks =
+      targetStatus === 'approved' || (!reviewMode && targetStatus === 'submitted');
+
+    if (enforceStrictChecks && diasTrabajados <= 0) {
       setFeedback({
         type: 'err',
         text: 'Ingresa los Días Trabajados del mes (mayor que 0) antes de enviar o aprobar el reporte.',
@@ -261,7 +268,7 @@ export function ParteMensualEditor({
       return;
     }
 
-    if ((targetStatus === 'submitted' || targetStatus === 'approved') && alerts.length > 0) {
+    if (enforceStrictChecks && alerts.length > 0) {
       setFeedback({
         type: 'err',
         text: 'Corrige las alertas de verificación en la tabla antes de enviar o aprobar el reporte.',
@@ -281,7 +288,6 @@ export function ParteMensualEditor({
         school.directorUid && /^[a-zA-Z0-9_-]{1,128}$/.test(school.directorUid)
           ? school.directorUid
           : '';
-      const isAdminActor = profile.role === 'admin';
 
       if (existing.exists()) {
         const existingData = existing.data() as ParteMensualReport;
@@ -296,8 +302,16 @@ export function ParteMensualEditor({
           ...(isAdminActor
             ? {
                 directorUid: validSchoolDirectorUid || existingData.directorUid || profile.uid,
-                reviewedByUid: targetStatus === 'approved' ? profile.uid : '',
-                reviewComment: targetStatus === 'approved' || targetStatus === 'submitted' ? '' : existingData.reviewComment || '',
+                reviewedByUid:
+                  targetStatus === 'approved'
+                    ? profile.uid
+                    : targetStatus === 'returned'
+                    ? existingData.reviewedByUid || profile.uid
+                    : '',
+                reviewComment:
+                  targetStatus === 'approved' || targetStatus === 'submitted'
+                    ? ''
+                    : existingData.reviewComment || '',
               }
             : {}),
           updatedAt: serverTimestamp(),
@@ -331,6 +345,8 @@ export function ParteMensualEditor({
         text:
           targetStatus === 'approved'
             ? 'Parte Mensual guardado y aprobado oficialmente.'
+            : reviewMode
+            ? 'Cambios guardados correctamente en el Parte Mensual.'
             : targetStatus === 'submitted'
             ? 'Parte Mensual enviado al Distrito Educativo N° 18-B para revisión.'
             : 'Borrador de Parte Mensual guardado en la nube.',
@@ -845,34 +861,61 @@ export function ParteMensualEditor({
 
         {!isLocked && (
           <div className="flex flex-wrap items-center gap-3 ml-auto">
-            <button
-              type="button"
-              disabled={saving}
-              onClick={() => handleSave('draft')}
-              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 disabled:opacity-50 cursor-pointer whitespace-nowrap"
-            >
-              <Save className="w-3.5 h-3.5" />
-              Guardar borrador
-            </button>
-            <button
-              type="button"
-              disabled={saving || diasTrabajados <= 0 || alerts.length > 0}
-              onClick={() => handleSave('submitted')}
-              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-blue-700 hover:bg-blue-800 text-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
-            >
-              <Send className="w-3.5 h-3.5" />
-              Enviar a la distrital
-            </button>
-            {profile.role === 'admin' && (
-              <button
-                type="button"
-                disabled={saving || diasTrabajados <= 0 || alerts.length > 0}
-                onClick={() => handleSave('approved')}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-emerald-700 hover:bg-emerald-800 text-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
-              >
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                Guardar y aprobar
-              </button>
+            {reviewMode ? (
+              <>
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => handleSave(status)}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-blue-700 hover:bg-blue-800 text-white disabled:opacity-50 cursor-pointer whitespace-nowrap"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  Guardar cambios
+                </button>
+                {isAdminActor && status !== 'approved' && (
+                  <button
+                    type="button"
+                    disabled={saving || diasTrabajados <= 0 || alerts.length > 0}
+                    onClick={() => handleSave('approved')}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-emerald-700 hover:bg-emerald-800 text-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Guardar y aprobar
+                  </button>
+                )}
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => handleSave('draft')}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 disabled:opacity-50 cursor-pointer whitespace-nowrap"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  Guardar borrador
+                </button>
+                <button
+                  type="button"
+                  disabled={saving || diasTrabajados <= 0 || alerts.length > 0}
+                  onClick={() => handleSave('submitted')}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-blue-700 hover:bg-blue-800 text-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  Enviar a la distrital
+                </button>
+                {isAdminActor && (
+                  <button
+                    type="button"
+                    disabled={saving || diasTrabajados <= 0 || alerts.length > 0}
+                    onClick={() => handleSave('approved')}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-emerald-700 hover:bg-emerald-800 text-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Guardar y aprobar
+                  </button>
+                )}
+              </>
             )}
           </div>
         )}

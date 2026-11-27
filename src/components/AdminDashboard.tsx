@@ -207,6 +207,7 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
   const [inspectingAnnual, setInspectingAnnual] = useState<AnnualReport | null>(null);
   const [inspectingParteMensual, setInspectingParteMensual] = useState<ParteMensualReport | null>(null);
   const [inspectingMonthly, setInspectingMonthly] = useState<MonthlyReport | null>(null);
+  const [editingInspectedReport, setEditingInspectedReport] = useState(false);
   const [returnComment, setReturnComment] = useState('');
   const [actionBusy, setActionBusy] = useState(false);
 
@@ -317,6 +318,24 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
       u8();
     };
   }, []);
+
+  useEffect(() => {
+    setInspectingAnnual((prev) =>
+      prev ? annualReports.find((r) => r.id === prev.id) || prev : null
+    );
+  }, [annualReports]);
+
+  useEffect(() => {
+    setInspectingParteMensual((prev) =>
+      prev ? parteMensualReports.find((r) => r.id === prev.id) || prev : null
+    );
+  }, [parteMensualReports]);
+
+  useEffect(() => {
+    setInspectingMonthly((prev) =>
+      prev ? monthlyReports.find((r) => r.id === prev.id) || prev : null
+    );
+  }, [monthlyReports]);
 
   useEffect(() => {
     const deadlinesDocId = `deadlines_${year}`;
@@ -750,6 +769,7 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
       setInspectingAnnual(null);
       setInspectingParteMensual(null);
       setInspectingMonthly(null);
+      setEditingInspectedReport(false);
       setReturnComment('');
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `${colName}/${reportId}`);
@@ -2187,6 +2207,7 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                   setReviewKind('parteMensual');
                   setInspectingAnnual(null);
                   setInspectingMonthly(null);
+                  setEditingInspectedReport(false);
                 }}
                 className={`px-3 py-1.5 text-xs font-medium cursor-pointer whitespace-nowrap ${
                   reviewKind === 'parteMensual'
@@ -2202,6 +2223,7 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                   setReviewKind('monthly');
                   setInspectingAnnual(null);
                   setInspectingParteMensual(null);
+                  setEditingInspectedReport(false);
                 }}
                 className={`px-3 py-1.5 text-xs font-medium cursor-pointer whitespace-nowrap ${
                   reviewKind === 'monthly' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
@@ -2215,6 +2237,7 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                   setReviewKind('annual');
                   setInspectingMonthly(null);
                   setInspectingParteMensual(null);
+                  setEditingInspectedReport(false);
                 }}
                 className={`px-3 py-1.5 text-xs font-medium cursor-pointer whitespace-nowrap ${
                   reviewKind === 'annual' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
@@ -2357,212 +2380,267 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                         )}`}
                   </h3>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setInspectingAnnual(null);
-                    setInspectingParteMensual(null);
-                    setInspectingMonthly(null);
-                  }}
-                  className="px-3 py-1.5 text-xs border border-slate-300 bg-white hover:bg-slate-50 cursor-pointer"
-                >
-                  Cerrar inspección
-                </button>
-              </div>
-
-              {inspectingAnnual && (
-                <>
-                  {inspectingAnnual.level === 'basica' && (
-                    <BasicaAnnualEditor
-                      year={inspectingAnnual.year}
-                      basicaScope={getBasicaScope(
-                        schools.find((s) => s.id === inspectingAnnual.schoolId)
-                      )}
-                      school={{
-                        id: inspectingAnnual.schoolId,
-                        saceCode: inspectingAnnual.saceCode,
-                        name: inspectingAnnual.schoolName,
-                        community: inspectingAnnual.community,
-                        levels: ['basica'],
-                        basicaScope: getBasicaScope(
-                          schools.find((s) => s.id === inspectingAnnual.schoolId)
-                        ),
-                        sector: inspectingAnnual.sector,
-                        modality: inspectingAnnual.modality,
-                        directorUid: inspectingAnnual.directorUid,
-                        directorDisplayName: inspectingAnnual.directorName,
-                        active: true,
-                      }}
-                      profile={profile}
-                      readOnly
-                    />
-                  )}
-                  {inspectingAnnual.level === 'media' && (
-                    <MediaAnnualEditor
-                      year={inspectingAnnual.year}
-                      school={{
-                        id: inspectingAnnual.schoolId,
-                        saceCode: inspectingAnnual.saceCode,
-                        name: inspectingAnnual.schoolName,
-                        community: inspectingAnnual.community,
-                        levels: ['media'],
-                        sector: inspectingAnnual.sector,
-                        modality: inspectingAnnual.modality,
-                        directorUid: inspectingAnnual.directorUid,
-                        directorDisplayName: inspectingAnnual.directorName,
-                        active: true,
-                      }}
-                      profile={profile}
-                      readOnly
-                    />
-                  )}
-                  {inspectingAnnual.level === 'prebasica' && (
-                    <PrebasicaAnnualEditor
-                      year={inspectingAnnual.year}
-                      school={{
-                        id: inspectingAnnual.schoolId,
-                        saceCode: inspectingAnnual.saceCode,
-                        name: inspectingAnnual.schoolName,
-                        community: inspectingAnnual.community,
-                        levels: ['prebasica'],
-                        sector: inspectingAnnual.sector,
-                        modality: inspectingAnnual.modality,
-                        directorUid: inspectingAnnual.directorUid,
-                        directorDisplayName: inspectingAnnual.directorName,
-                        active: true,
-                      }}
-                      profile={profile}
-                      readOnly
-                    />
-                  )}
-                </>
-              )}
-
-              {inspectingParteMensual && (
-                <ParteMensualEditor
-                  year={inspectingParteMensual.year}
-                  month={inspectingParteMensual.month}
-                  level={inspectingParteMensual.level}
-                  basicaScope={
-                    inspectingParteMensual.level === 'basica'
-                      ? getBasicaScope(
-                          schools.find((s) => s.id === inspectingParteMensual.schoolId)
-                        )
-                      : undefined
-                  }
-                  school={{
-                    id: inspectingParteMensual.schoolId,
-                    saceCode: inspectingParteMensual.saceCode,
-                    name: inspectingParteMensual.schoolName,
-                    community: inspectingParteMensual.lugar || 'Omoa',
-                    levels: [inspectingParteMensual.level],
-                    ...(inspectingParteMensual.level === 'basica'
-                      ? {
-                          basicaScope: getBasicaScope(
-                            schools.find((s) => s.id === inspectingParteMensual.schoolId)
-                          ),
-                        }
-                      : {}),
-                    sector: 'gubernamental',
-                    modality: 'presencial',
-                    directorUid: inspectingParteMensual.directorUid,
-                    directorDisplayName: inspectingParteMensual.directorName,
-                    active: true,
-                  }}
-                  profile={profile}
-                  readOnly
-                />
-              )}
-
-              {inspectingMonthly && (
-                <MovimientosSaceEditor
-                  year={inspectingMonthly.year}
-                  month={inspectingMonthly.month}
-                  level={inspectingMonthly.level}
-                  school={{
-                    id: inspectingMonthly.schoolId,
-                    saceCode: inspectingMonthly.saceCode,
-                    name: inspectingMonthly.schoolName,
-                    community: 'Omoa',
-                    levels: [inspectingMonthly.level],
-                    ...(inspectingMonthly.level === 'basica'
-                      ? {
-                          basicaScope: getBasicaScope(
-                            schools.find((s) => s.id === inspectingMonthly.schoolId)
-                          ),
-                        }
-                      : {}),
-                    sector: 'gubernamental',
-                    modality: 'presencial',
-                    directorUid: inspectingMonthly.directorUid,
-                    directorDisplayName: inspectingMonthly.directorName,
-                    active: true,
-                  }}
-                  profile={profile}
-                  readOnly
-                />
-              )}
-
-              <div className="pt-4 border-t border-slate-200 flex flex-wrap items-end justify-between gap-4">
-                <div className="flex-1 min-w-[260px]">
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Observaciones para devolver al director (requerido si se devuelve)
-                  </label>
-                  <input
-                    type="text"
-                    value={returnComment}
-                    onChange={(e) => setReturnComment(e.target.value)}
-                    placeholder="Ej. Revisar Matrícula Final de 4° grado, no coincide con edades."
-                    className="w-full px-3 py-2 text-xs border border-slate-300"
-                  />
-                </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    disabled={actionBusy || !returnComment.trim()}
-                    onClick={() =>
-                      handleReviewDecision(
-                        inspectingAnnual
-                          ? 'annual'
-                          : inspectingParteMensual
-                          ? 'parteMensual'
-                          : 'monthly',
-                        inspectingAnnual
-                          ? inspectingAnnual.id
-                          : inspectingParteMensual
-                          ? inspectingParteMensual.id
-                          : inspectingMonthly!.id,
-                        'returned'
-                      )
-                    }
-                    className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-amber-600 hover:bg-amber-700 text-white disabled:opacity-50 cursor-pointer whitespace-nowrap"
+                    onClick={() => setEditingInspectedReport((v) => !v)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border cursor-pointer whitespace-nowrap ${
+                      editingInspectedReport
+                        ? 'border-blue-700 bg-blue-700 text-white hover:bg-blue-800'
+                        : 'border-blue-300 bg-blue-50 text-blue-800 hover:bg-blue-100'
+                    }`}
                   >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    Devolver con observaciones
+                    {editingInspectedReport ? (
+                      <>
+                        <Eye className="w-3.5 h-3.5" />
+                        Bloquear edición (solo lectura)
+                      </>
+                    ) : (
+                      <>
+                        <Pencil className="w-3.5 h-3.5" />
+                        Habilitar edición
+                      </>
+                    )}
                   </button>
                   <button
                     type="button"
-                    disabled={actionBusy}
-                    onClick={() =>
-                      handleReviewDecision(
-                        inspectingAnnual
-                          ? 'annual'
-                          : inspectingParteMensual
-                          ? 'parteMensual'
-                          : 'monthly',
-                        inspectingAnnual
-                          ? inspectingAnnual.id
-                          : inspectingParteMensual
-                          ? inspectingParteMensual.id
-                          : inspectingMonthly!.id,
-                        'approved'
-                      )
-                    }
-                    className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-emerald-700 hover:bg-emerald-800 text-white disabled:opacity-50 cursor-pointer whitespace-nowrap"
+                    onClick={() => {
+                      setInspectingAnnual(null);
+                      setInspectingParteMensual(null);
+                      setInspectingMonthly(null);
+                      setEditingInspectedReport(false);
+                    }}
+                    className="px-3 py-1.5 text-xs border border-slate-300 bg-white hover:bg-slate-50 cursor-pointer"
                   >
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    Aprobar reporte
+                    Cerrar inspección
                   </button>
+                </div>
+              </div>
+
+              {editingInspectedReport && (
+                <div className="p-3 bg-blue-50 border border-blue-200 text-xs text-blue-900 flex items-start gap-2">
+                  <Pencil className="w-4 h-4 text-blue-700 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-semibold">Modo de edición habilitado</p>
+                    <p className="mt-0.5 text-blue-800">
+                      Puedes modificar los datos del cuadro si es necesario. Usa{' '}
+                      <strong>Guardar cambios</strong> dentro del cuadro antes de aprobar o devolver,
+                      o presiona <strong>Guardar y aprobar</strong> directamente.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {inspectingAnnual && (() => {
+                const matchedSchool = schools.find((s) => s.id === inspectingAnnual.schoolId);
+                const resolvedSchool: School = matchedSchool
+                  ? {
+                      ...matchedSchool,
+                      directorUid: inspectingAnnual.directorUid || matchedSchool.directorUid,
+                      directorDisplayName:
+                        inspectingAnnual.directorName || matchedSchool.directorDisplayName,
+                    }
+                  : {
+                      id: inspectingAnnual.schoolId,
+                      saceCode: inspectingAnnual.saceCode,
+                      name: inspectingAnnual.schoolName,
+                      community: inspectingAnnual.community,
+                      levels: [inspectingAnnual.level],
+                      sector: inspectingAnnual.sector,
+                      modality: inspectingAnnual.modality,
+                      directorUid: inspectingAnnual.directorUid,
+                      directorDisplayName: inspectingAnnual.directorName,
+                      active: true,
+                    };
+
+                return (
+                  <>
+                    {inspectingAnnual.level === 'basica' && (
+                      <BasicaAnnualEditor
+                        key={inspectingAnnual.id}
+                        year={inspectingAnnual.year}
+                        basicaScope={getBasicaScope(resolvedSchool)}
+                        school={resolvedSchool}
+                        profile={profile}
+                        readOnly={!editingInspectedReport}
+                        reviewMode
+                      />
+                    )}
+                    {inspectingAnnual.level === 'media' && (
+                      <MediaAnnualEditor
+                        key={inspectingAnnual.id}
+                        year={inspectingAnnual.year}
+                        school={resolvedSchool}
+                        profile={profile}
+                        readOnly={!editingInspectedReport}
+                        reviewMode
+                      />
+                    )}
+                    {inspectingAnnual.level === 'prebasica' && (
+                      <PrebasicaAnnualEditor
+                        key={inspectingAnnual.id}
+                        year={inspectingAnnual.year}
+                        school={resolvedSchool}
+                        profile={profile}
+                        readOnly={!editingInspectedReport}
+                        reviewMode
+                      />
+                    )}
+                  </>
+                );
+              })()}
+
+              {inspectingParteMensual && (() => {
+                const matchedSchool = schools.find(
+                  (s) => s.id === inspectingParteMensual.schoolId
+                );
+                const resolvedSchool: School = matchedSchool
+                  ? {
+                      ...matchedSchool,
+                      community:
+                        inspectingParteMensual.lugar || matchedSchool.community || 'Omoa',
+                      directorUid:
+                        inspectingParteMensual.directorUid || matchedSchool.directorUid,
+                      directorDisplayName:
+                        inspectingParteMensual.directorName || matchedSchool.directorDisplayName,
+                    }
+                  : {
+                      id: inspectingParteMensual.schoolId,
+                      saceCode: inspectingParteMensual.saceCode,
+                      name: inspectingParteMensual.schoolName,
+                      community: inspectingParteMensual.lugar || 'Omoa',
+                      levels: [inspectingParteMensual.level],
+                      sector: 'gubernamental',
+                      modality: 'presencial',
+                      directorUid: inspectingParteMensual.directorUid,
+                      directorDisplayName: inspectingParteMensual.directorName,
+                      active: true,
+                    };
+
+                return (
+                  <ParteMensualEditor
+                    key={inspectingParteMensual.id}
+                    year={inspectingParteMensual.year}
+                    month={inspectingParteMensual.month}
+                    level={inspectingParteMensual.level}
+                    basicaScope={
+                      inspectingParteMensual.level === 'basica'
+                        ? getBasicaScope(resolvedSchool)
+                        : undefined
+                    }
+                    school={resolvedSchool}
+                    profile={profile}
+                    readOnly={!editingInspectedReport}
+                    reviewMode
+                  />
+                );
+              })()}
+
+              {inspectingMonthly && (() => {
+                const matchedSchool = schools.find((s) => s.id === inspectingMonthly.schoolId);
+                const resolvedSchool: School = matchedSchool
+                  ? {
+                      ...matchedSchool,
+                      directorUid: inspectingMonthly.directorUid || matchedSchool.directorUid,
+                      directorDisplayName:
+                        inspectingMonthly.directorName || matchedSchool.directorDisplayName,
+                    }
+                  : {
+                      id: inspectingMonthly.schoolId,
+                      saceCode: inspectingMonthly.saceCode,
+                      name: inspectingMonthly.schoolName,
+                      community: 'Omoa',
+                      levels: [inspectingMonthly.level],
+                      sector: 'gubernamental',
+                      modality: 'presencial',
+                      directorUid: inspectingMonthly.directorUid,
+                      directorDisplayName: inspectingMonthly.directorName,
+                      active: true,
+                    };
+
+                return (
+                  <MovimientosSaceEditor
+                    key={inspectingMonthly.id}
+                    year={inspectingMonthly.year}
+                    month={inspectingMonthly.month}
+                    level={inspectingMonthly.level}
+                    school={resolvedSchool}
+                    profile={profile}
+                    readOnly={!editingInspectedReport}
+                    reviewMode
+                  />
+                );
+              })()}
+
+              <div className="pt-4 border-t border-slate-200 space-y-3">
+                {editingInspectedReport && (
+                  <p className="text-[11px] text-blue-800">
+                    Si realizaste modificaciones en los campos del cuadro, recuerda presionar{' '}
+                    <strong>Guardar cambios</strong> dentro del cuadro antes de usar las acciones
+                    de aprobación o devolución.
+                  </p>
+                )}
+                <div className="flex flex-wrap items-end justify-between gap-4">
+                  <div className="flex-1 min-w-[260px]">
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Observaciones para devolver al director (requerido si se devuelve)
+                    </label>
+                    <input
+                      type="text"
+                      value={returnComment}
+                      onChange={(e) => setReturnComment(e.target.value)}
+                      placeholder="Ej. Revisar Matrícula Final de 4° grado, no coincide con edades."
+                      className="w-full px-3 py-2 text-xs border border-slate-300"
+                    />
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={actionBusy || !returnComment.trim()}
+                      onClick={() =>
+                        handleReviewDecision(
+                          inspectingAnnual
+                            ? 'annual'
+                            : inspectingParteMensual
+                            ? 'parteMensual'
+                            : 'monthly',
+                          inspectingAnnual
+                            ? inspectingAnnual.id
+                            : inspectingParteMensual
+                            ? inspectingParteMensual.id
+                            : inspectingMonthly!.id,
+                          'returned'
+                        )
+                      }
+                      className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-amber-600 hover:bg-amber-700 text-white disabled:opacity-50 cursor-pointer whitespace-nowrap"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      Devolver con observaciones
+                    </button>
+                    <button
+                      type="button"
+                      disabled={actionBusy}
+                      onClick={() =>
+                        handleReviewDecision(
+                          inspectingAnnual
+                            ? 'annual'
+                            : inspectingParteMensual
+                            ? 'parteMensual'
+                            : 'monthly',
+                          inspectingAnnual
+                            ? inspectingAnnual.id
+                            : inspectingParteMensual
+                            ? inspectingParteMensual.id
+                            : inspectingMonthly!.id,
+                          'approved'
+                        )
+                      }
+                      className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-emerald-700 hover:bg-emerald-800 text-white disabled:opacity-50 cursor-pointer whitespace-nowrap"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      Aprobar reporte
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2616,6 +2694,7 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                                 setInspectingAnnual(rep);
                                 setInspectingParteMensual(null);
                                 setInspectingMonthly(null);
+                                setEditingInspectedReport(false);
                                 setReturnComment(rep.reviewComment || '');
                               }}
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 border border-blue-200 bg-blue-50 hover:bg-blue-100 cursor-pointer whitespace-nowrap"
@@ -2662,6 +2741,7 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                                 setInspectingParteMensual(rep);
                                 setInspectingAnnual(null);
                                 setInspectingMonthly(null);
+                                setEditingInspectedReport(false);
                                 setReturnComment(rep.reviewComment || '');
                               }}
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 border border-blue-200 bg-blue-50 hover:bg-blue-100 cursor-pointer whitespace-nowrap"
@@ -2714,6 +2794,7 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                             setInspectingMonthly(rep);
                             setInspectingParteMensual(null);
                             setInspectingAnnual(null);
+                            setEditingInspectedReport(false);
                             setReturnComment(rep.reviewComment || '');
                           }}
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 border border-blue-200 bg-blue-50 hover:bg-blue-100 cursor-pointer whitespace-nowrap"

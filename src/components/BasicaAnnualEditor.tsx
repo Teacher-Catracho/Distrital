@@ -114,6 +114,7 @@ interface BasicaAnnualEditorProps {
   school: School;
   profile: UserProfile;
   readOnly?: boolean;
+  reviewMode?: boolean;
   externalData?: BasicaAnnualData;
   isConsolidated?: boolean;
   onAfterSave?: () => void;
@@ -125,6 +126,7 @@ export function BasicaAnnualEditor({
   school,
   profile,
   readOnly = false,
+  reviewMode = false,
   externalData,
   isConsolidated = false,
   onAfterSave,
@@ -208,14 +210,16 @@ export function BasicaAnnualEditor({
           setReviewComment('');
         }
 
-        const lockedAfterLoad =
-          readOnly ||
-          (profile.role !== 'admin' &&
-            (loadedStatus === 'approved' || loadedStatus === 'submitted'));
+        const shouldAutoApplyPm =
+          !reviewMode &&
+          !readOnly &&
+          loadedStatus !== 'approved' &&
+          loadedStatus !== 'submitted' &&
+          summary.monthsFound.length > 0;
 
         setPmSummary(summary);
         setData(
-          !lockedAfterLoad && summary.monthsFound.length > 0
+          shouldAutoApplyPm
             ? applyPmSummaryToBasica(baseData, summary, activeGrades)
             : baseData
         );
@@ -234,18 +238,21 @@ export function BasicaAnnualEditor({
     year,
     school.id,
     externalData,
-    readOnly,
-    profile.role,
+    reviewMode,
     activeGrades,
+    school.directorUid,
     school.directorDisplayName,
     profile.displayName,
     profile.dni,
+    profile.uid,
   ]);
 
+  const isAdminActor =
+    profile.role === 'admin' || profile.adminPosition === 'asistente_tecnico';
   const isLocked =
     Boolean(externalData) ||
     readOnly ||
-    (profile.role !== 'admin' && (status === 'approved' || status === 'submitted'));
+    (!isAdminActor && (status === 'approved' || status === 'submitted'));
 
   const handleSyncFromParteMensual = async () => {
     if (isLocked) return;
@@ -298,7 +305,7 @@ export function BasicaAnnualEditor({
     });
   };
 
-  const handleSave = async (targetStatus: 'draft' | 'submitted' | 'approved') => {
+  const handleSave = async (targetStatus: ReportStatus) => {
     setSaving(true);
     setFeedback(null);
     const path = `annualReports/${reportId}`;
@@ -309,17 +316,21 @@ export function BasicaAnnualEditor({
         school.directorUid && /^[a-zA-Z0-9_-]{1,128}$/.test(school.directorUid)
           ? school.directorUid
           : '';
-      const isAdminActor = profile.role === 'admin';
 
       if (existing.exists()) {
         const existingData = existing.data() as AnnualReport;
+        const cleanDirectorName =
+          directorName.trim() ||
+          school.directorDisplayName ||
+          existingData.directorName ||
+          profile.displayName;
         await updateDoc(ref, {
           schoolName: school.name,
           saceCode: school.saceCode,
           community: school.community,
           sector: school.sector,
           modality: school.modality,
-          directorName: directorName.trim(),
+          directorName: cleanDirectorName,
           directorDni: directorDni.trim(),
           placeAndDate: placeAndDate.trim(),
           data,
@@ -327,13 +338,23 @@ export function BasicaAnnualEditor({
           ...(isAdminActor
             ? {
                 directorUid: validSchoolDirectorUid || existingData.directorUid || profile.uid,
-                reviewedByUid: targetStatus === 'approved' ? profile.uid : '',
-                reviewComment: targetStatus === 'approved' || targetStatus === 'submitted' ? '' : existingData.reviewComment || '',
+                reviewedByUid:
+                  targetStatus === 'approved'
+                    ? profile.uid
+                    : targetStatus === 'returned'
+                    ? existingData.reviewedByUid || profile.uid
+                    : '',
+                reviewComment:
+                  targetStatus === 'approved' || targetStatus === 'submitted'
+                    ? ''
+                    : existingData.reviewComment || '',
               }
             : {}),
           updatedAt: serverTimestamp(),
         });
       } else {
+        const cleanDirectorName =
+          directorName.trim() || school.directorDisplayName || profile.displayName;
         await setDoc(ref, {
           year,
           schoolId: school.id,
@@ -344,7 +365,7 @@ export function BasicaAnnualEditor({
           modality: school.modality,
           level: 'basica',
           directorUid: validSchoolDirectorUid || profile.uid,
-          directorName: directorName.trim(),
+          directorName: cleanDirectorName,
           directorDni: directorDni.trim(),
           placeAndDate: placeAndDate.trim(),
           data,
@@ -364,6 +385,8 @@ export function BasicaAnnualEditor({
         text:
           targetStatus === 'approved'
             ? 'Cuadros anuales de Básica guardados y aprobados oficialmente.'
+            : reviewMode
+            ? 'Cambios guardados correctamente en los cuadros anuales de Básica.'
             : targetStatus === 'submitted'
             ? 'Cuadros anuales de Básica enviados al Distrito para revisión.'
             : 'Borrador guardado en la nube.',
@@ -512,34 +535,61 @@ export function BasicaAnnualEditor({
 
           {!isLocked && (
             <>
-              <button
-                type="button"
-                disabled={saving}
-                onClick={() => handleSave('draft')}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 cursor-pointer whitespace-nowrap"
-              >
-                <Save className="w-3.5 h-3.5" />
-                Guardar borrador
-              </button>
-              <button
-                type="button"
-                disabled={saving}
-                onClick={() => handleSave('submitted')}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-blue-700 hover:bg-blue-800 text-white cursor-pointer whitespace-nowrap"
-              >
-                <Send className="w-3.5 h-3.5" />
-                Enviar al Distrito
-              </button>
-              {profile.role === 'admin' && (
-                <button
-                  type="button"
-                  disabled={saving}
-                  onClick={() => handleSave('approved')}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer whitespace-nowrap"
-                >
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  Guardar y aprobar
-                </button>
+              {reviewMode ? (
+                <>
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => handleSave(status)}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-blue-700 hover:bg-blue-800 text-white cursor-pointer whitespace-nowrap disabled:opacity-50"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    Guardar cambios
+                  </button>
+                  {isAdminActor && status !== 'approved' && (
+                    <button
+                      type="button"
+                      disabled={saving}
+                      onClick={() => handleSave('approved')}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer whitespace-nowrap disabled:opacity-50"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      Guardar y aprobar
+                    </button>
+                  )}
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => handleSave('draft')}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 cursor-pointer whitespace-nowrap"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    Guardar borrador
+                  </button>
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => handleSave('submitted')}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-blue-700 hover:bg-blue-800 text-white cursor-pointer whitespace-nowrap"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    Enviar al Distrito
+                  </button>
+                  {isAdminActor && (
+                    <button
+                      type="button"
+                      disabled={saving}
+                      onClick={() => handleSave('approved')}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer whitespace-nowrap"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      Guardar y aprobar
+                    </button>
+                  )}
+                </>
               )}
             </>
           )}
