@@ -13,8 +13,7 @@ import {
   serverTimestamp,
   writeBatch,
 } from 'firebase/firestore';
-import firebaseConfig from '../../firebase-applet-config.json';
-import { db } from '../firebase';
+import { db, resolvedFirebaseConfig } from '../firebase';
 import type {
   AdminPosition,
   DistrictActivity,
@@ -142,7 +141,7 @@ async function provisionAuthAccountWithoutSessionImpact(
   displayName: string
 ): Promise<{ uid: string; email: string }> {
   const appName = `sace-provisioner-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-  const secondaryApp = initializeApp(firebaseConfig, appName);
+  const secondaryApp = initializeApp(resolvedFirebaseConfig, appName);
   const secondaryAuth = initializeAuth(secondaryApp, {
     persistence: inMemoryPersistence,
   });

@@ -82,11 +82,11 @@ export function DirectorDashboard({
   const [selectedMonth, setSelectedMonth] = useState<number>(() =>
     clampSchoolMonth(new Date().getMonth() + 1)
   );
-  const [parteMensualReports, setParteMensualReports] = useState<ParteMensualReport[]>([]);
-  const [monthlyReports, setMonthlyReports] = useState<MonthlyReport[]>([]);
-  const [annualReports, setAnnualReports] = useState<AnnualReport[]>([]);
-  const [activities, setActivities] = useState<DistrictActivity[]>([]);
-  const [activityCompliances, setActivityCompliances] = useState<ActivityCompliance[]>([]);
+  const [allParteMensualReports, setAllParteMensualReports] = useState<ParteMensualReport[]>([]);
+  const [allMonthlyReports, setAllMonthlyReports] = useState<MonthlyReport[]>([]);
+  const [allAnnualReports, setAllAnnualReports] = useState<AnnualReport[]>([]);
+  const [allActivities, setAllActivities] = useState<DistrictActivity[]>([]);
+  const [allActivityCompliances, setAllActivityCompliances] = useState<ActivityCompliance[]>([]);
   const [districtDeadlines, setDistrictDeadlines] = useState<DistrictDeadlines | null>(null);
 
   useEffect(() => {
@@ -103,10 +103,8 @@ export function DirectorDashboard({
     const unsubP = onSnapshot(
       pQuery,
       (snap) => {
-        setParteMensualReports(
-          snap.docs
-            .map((d) => ({ id: d.id, ...(d.data() as Omit<ParteMensualReport, 'id'>) }))
-            .filter((r) => r.year === year)
+        setAllParteMensualReports(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ParteMensualReport, 'id'>) }))
         );
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'parteMensualReports')
@@ -119,10 +117,8 @@ export function DirectorDashboard({
     const unsubM = onSnapshot(
       mQuery,
       (snap) => {
-        setMonthlyReports(
-          snap.docs
-            .map((d) => ({ id: d.id, ...(d.data() as Omit<MonthlyReport, 'id'>) }))
-            .filter((r) => r.year === year)
+        setAllMonthlyReports(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<MonthlyReport, 'id'>) }))
         );
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'monthlyReports')
@@ -135,10 +131,8 @@ export function DirectorDashboard({
     const unsubA = onSnapshot(
       aQuery,
       (snap) => {
-        setAnnualReports(
-          snap.docs
-            .map((d) => ({ id: d.id, ...(d.data() as Omit<AnnualReport, 'id'>) }))
-            .filter((r) => r.year === year)
+        setAllAnnualReports(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AnnualReport, 'id'>) }))
         );
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'annualReports')
@@ -151,10 +145,10 @@ export function DirectorDashboard({
     const unsubAct = onSnapshot(
       actQuery,
       (snap) => {
-        setActivities(
+        setAllActivities(
           snap.docs
             .map((d) => ({ id: d.id, ...(d.data() as Omit<DistrictActivity, 'id'>) }))
-            .filter((a) => a.year === year && a.active !== false)
+            .filter((a) => a.active !== false)
         );
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'activities')
@@ -167,15 +161,23 @@ export function DirectorDashboard({
     const unsubComp = onSnapshot(
       compQuery,
       (snap) => {
-        setActivityCompliances(
-          snap.docs
-            .map((d) => ({ id: d.id, ...(d.data() as Omit<ActivityCompliance, 'id'>) }))
-            .filter((c) => c.year === year)
+        setAllActivityCompliances(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ActivityCompliance, 'id'>) }))
         );
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'activityCompliances')
     );
 
+    return () => {
+      unsubP();
+      unsubM();
+      unsubA();
+      unsubAct();
+      unsubComp();
+    };
+  }, [profile.uid]);
+
+  useEffect(() => {
     const deadlinesDocId = `deadlines_${year}`;
     const unsubDeadlines = onSnapshot(
       doc(db, 'districtConfig', deadlinesDocId),
@@ -192,15 +194,29 @@ export function DirectorDashboard({
       (err) => handleFirestoreError(err, OperationType.GET, `districtConfig/${deadlinesDocId}`)
     );
 
-    return () => {
-      unsubP();
-      unsubM();
-      unsubA();
-      unsubAct();
-      unsubComp();
-      unsubDeadlines();
-    };
-  }, [profile.uid, year]);
+    return () => unsubDeadlines();
+  }, [year]);
+
+  const parteMensualReports = useMemo(
+    () => allParteMensualReports.filter((r) => r.year === year),
+    [allParteMensualReports, year]
+  );
+  const monthlyReports = useMemo(
+    () => allMonthlyReports.filter((r) => r.year === year),
+    [allMonthlyReports, year]
+  );
+  const annualReports = useMemo(
+    () => allAnnualReports.filter((r) => r.year === year),
+    [allAnnualReports, year]
+  );
+  const activities = useMemo(
+    () => allActivities.filter((a) => a.year === year),
+    [allActivities, year]
+  );
+  const activityCompliances = useMemo(
+    () => allActivityCompliances.filter((c) => c.year === year),
+    [allActivityCompliances, year]
+  );
 
   const pendingActivities = useMemo(() => {
     const todayIso = getTodayIsoDate();

@@ -27,10 +27,26 @@ export class ErrorBoundary extends React.Component<
       try {
         const parsed = JSON.parse(this.state.errorMessage);
         if (parsed?.error) {
-          friendly = `Error de permisos o conexión (${parsed.operationType} en ${parsed.path}): ${parsed.error}`;
+          if (
+            String(parsed.error).includes('Quota limit exceeded') ||
+            String(parsed.error).includes('Quota exceeded') ||
+            String(parsed.error).includes('resource-exhausted')
+          ) {
+            friendly =
+              'Se alcanzó el límite diario de lecturas gratuitas de Firestore (50,000 lecturas/día en el plan gratuito). Espera al reinicio diario de cuota o conecta el despliegue en Vercel a tu propio proyecto Firebase con plan Blaze.';
+          } else {
+            friendly = `Error de permisos o conexión (${parsed.operationType} en ${parsed.path}): ${parsed.error}`;
+          }
         }
       } catch {
-        // plain error message
+        if (
+          friendly.includes('Quota limit exceeded') ||
+          friendly.includes('Quota exceeded') ||
+          friendly.includes('resource-exhausted')
+        ) {
+          friendly =
+            'Se alcanzó el límite diario de lecturas gratuitas de Firestore (50,000 lecturas/día en el plan gratuito). Espera al reinicio diario de cuota o conecta el despliegue en Vercel a tu propio proyecto Firebase con plan Blaze.';
+        }
       }
 
       return (

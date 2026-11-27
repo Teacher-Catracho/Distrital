@@ -17,7 +17,7 @@ import {
   updateDoc,
   writeBatch,
 } from 'firebase/firestore';
-import { auth, db, handleFirestoreError, OperationType } from '../firebase';
+import { auth, db, handleFirestoreError, isFirestoreQuotaError, OperationType } from '../firebase';
 import type {
   AdminPosition,
   BasicaCenterType,
@@ -102,10 +102,16 @@ function mapFirebaseAuthError(err: unknown): string {
       return 'Esta cuenta fue deshabilitada. Comunícate con la Dirección Distrital.';
     case 'auth/network-request-failed':
       return 'Error de conexión. Verifica tu acceso a internet e intenta de nuevo.';
+    case 'auth/quota-exceeded':
+    case 'resource-exhausted':
+      return 'Se alcanzó el límite diario de lecturas gratuitas de Firestore (50,000/día). Espera al reinicio diario de cuota o conecta la app a un proyecto Firebase propio con plan Blaze en Vercel.';
     default:
       return err instanceof Error ? err.message : 'No se pudo iniciar sesión con credenciales.';
   }
 }
+
+const QUOTA_ERROR_MESSAGE =
+  'Se alcanzó el límite diario de lecturas gratuitas de la base de datos Firebase (plan gratuito). Espera al reinicio diario de cuota o configura tus variables VITE_FIREBASE_* en Vercel con tu propio proyecto Firebase.';
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
@@ -219,9 +225,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       } catch (err) {
         console.error(err);
-        setAuthError(
-          err instanceof Error ? err.message : 'Error al inicializar el perfil de usuario.'
-        );
+        if (isFirestoreQuotaError(err)) {
+          await signOut(auth).catch(() => {});
+          setProfile(null);
+          setIsAdminMember(false);
+          setAuthError(QUOTA_ERROR_MESSAGE);
+        } else {
+          setAuthError(
+            err instanceof Error ? err.message : 'Error al inicializar el perfil de usuario.'
+          );
+        }
         setLoading(false);
       }
     });
@@ -245,36 +258,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       },
       (error) => {
         setLoading(false);
-        handleFirestoreError(error, OperationType.GET, userPath);
-      }
-    );
-
-    const reqPath = `directorRequests/${firebaseUser.uid}`;
-    const unsubReq = onSnapshot(
-      doc(db, 'directorRequests', firebaseUser.uid),
-      (snap) => {
-        if (snap.exists()) {
-          setDirectorRequest(snap.data() as DirectorRequest);
-        } else {
-          setDirectorRequest(null);
+        if (isFirestoreQuotaError(error)) {
+          setAuthError(QUOTA_ERROR_MESSAGE);
+          return;
         }
-      },
-      (error) => {
-        handleFirestoreError(error, OperationType.GET, reqPath);
-      }
-    );
-
-    const schoolsPath = 'schools';
-    const unsubSchools = onSnapshot(
-      collection(db, schoolsPath),
-      (snap) => {
-        const list = snap.docs
-          .map((d) => ({ id: d.id, ...(d.data() as Omit<School, 'id'>) }))
-          .sort((a, b) => a.name.localeCompare(b.name));
-        setSchools(list);
-      },
-      (error) => {
-        handleFirestoreError(error, OperationType.LIST, schoolsPath);
+        handleFirestoreError(error, OperationType.GET, userPath);
       }
     );
 
@@ -287,17 +275,105 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setIsAdminMember(isPrimaryUser || snap.exists());
       },
       (error) => {
+        if (isFirestoreQuotaError(error)) {
+          return;
+        }
         handleFirestoreError(error, OperationType.GET, adminDocPath);
       }
     );
 
     return () => {
       unsubProfile();
-      unsubReq();
-      unsubSchools();
       unsubAdminDoc();
     };
   }, [firebaseUser]);
+
+  useEffect(() => {
+    if (!firebaseUser || !profile) return;
+
+    const isAdminUser =
+      profile.role === 'admin' ||
+      profile.adminPosition === 'asistente_tecnico' ||
+      isAdminMember;
+
+    const needsRequestWatch =
+      !isAdminUser && (profile.role === 'pending' || !profile.schoolId);
+
+    let unsubReq: (() => void) | undefined;
+    if (needsRequestWatch) {
+      const reqPath = `directorRequests/${firebaseUser.uid}`;
+      unsubReq = onSnapshot(
+        doc(db, 'directorRequests', firebaseUser.uid),
+        (snap) => {
+          setDirectorRequest(snap.exists() ? (snap.data() as DirectorRequest) : null);
+        },
+        (error) => {
+          if (isFirestoreQuotaError(error)) return;
+          handleFirestoreError(error, OperationType.GET, reqPath);
+        }
+      );
+    } else {
+      setDirectorRequest(null);
+    }
+
+    const isAssignedActiveDirector =
+      !isAdminUser &&
+      profile.role === 'director' &&
+      Boolean(profile.schoolId) &&
+      !profile.needsOnboarding;
+
+    let unsubSchools: (() => void) | undefined;
+    if (isAssignedActiveDirector) {
+      const singleSchoolPath = `schools/${profile.schoolId}`;
+      unsubSchools = onSnapshot(
+        doc(db, 'schools', profile.schoolId),
+        (snap) => {
+          if (snap.exists()) {
+            setSchools([{ id: snap.id, ...(snap.data() as Omit<School, 'id'>) }]);
+          } else {
+            setSchools([]);
+          }
+        },
+        (error) => {
+          if (isFirestoreQuotaError(error)) {
+            setAuthError(QUOTA_ERROR_MESSAGE);
+            return;
+          }
+          handleFirestoreError(error, OperationType.GET, singleSchoolPath);
+        }
+      );
+    } else {
+      const schoolsPath = 'schools';
+      unsubSchools = onSnapshot(
+        collection(db, schoolsPath),
+        (snap) => {
+          const list = snap.docs
+            .map((d) => ({ id: d.id, ...(d.data() as Omit<School, 'id'>) }))
+            .sort((a, b) => a.name.localeCompare(b.name));
+          setSchools(list);
+        },
+        (error) => {
+          if (isFirestoreQuotaError(error)) {
+            setAuthError(QUOTA_ERROR_MESSAGE);
+            return;
+          }
+          handleFirestoreError(error, OperationType.LIST, schoolsPath);
+        }
+      );
+    }
+
+    return () => {
+      unsubReq?.();
+      unsubSchools?.();
+    };
+  }, [
+    firebaseUser,
+    profile?.role,
+    profile?.schoolId,
+    profile?.needsOnboarding,
+    profile?.adminPosition,
+    isAdminMember,
+  ]);
 
   const clearAuthError = () => setAuthError(null);
 
