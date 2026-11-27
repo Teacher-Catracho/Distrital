@@ -25,7 +25,7 @@ import { LoginView } from './components/LoginView';
 import { formatAccountIdentifier } from './utils/saceCalculations';
 
 function MainShell() {
-  const { firebaseUser, profile, assignedSchool, loading, logout } = useAuth();
+  const { firebaseUser, profile, assignedSchool, isAdminMember, loading, logout } = useAuth();
   const [adminSection, setAdminSection] = useState<AdminSection>('overview');
   const [directorSection, setDirectorSection] = useState<DirectorSection>('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -46,15 +46,19 @@ function MainShell() {
     return <LoginView />;
   }
 
+  const isAdmin =
+    profile.role === 'admin' ||
+    profile.adminPosition === 'asistente_tecnico' ||
+    isAdminMember;
+
   if (
-    profile.role === 'pending' ||
-    profile.needsOnboarding ||
-    (profile.role === 'director' && !assignedSchool)
+    !isAdmin &&
+    (profile.role === 'pending' ||
+      profile.needsOnboarding ||
+      (profile.role === 'director' && !assignedSchool))
   ) {
     return <DirectorOnboarding />;
   }
-
-  const isAdmin = profile.role === 'admin';
 
   const adminNav: { key: AdminSection; label: string; icon: typeof LayoutDashboard }[] = [
     { key: 'overview', label: 'Tablero Distrital', icon: LayoutDashboard },

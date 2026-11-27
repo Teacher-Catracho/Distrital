@@ -19,6 +19,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from '../firebase';
 import type {
+  AdminPosition,
   BasicaCenterType,
   BasicaScope,
   DirectorRequest,
@@ -58,6 +59,7 @@ interface AuthContextValue {
   directorRequest: DirectorRequest | null;
   schools: School[];
   assignedSchool: School | null;
+  isAdminMember: boolean;
   loading: boolean;
   authError: string | null;
   clearAuthError: () => void;
@@ -112,6 +114,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [directorRequest, setDirectorRequest] = useState<DirectorRequest | null>(null);
   const [schools, setSchools] = useState<School[]>([]);
+  const [isAdminMember, setIsAdminMember] = useState(false);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -122,6 +125,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setProfile(null);
         setDirectorRequest(null);
         setSchools([]);
+        setIsAdminMember(false);
         setLoading(false);
         return;
       }
@@ -130,14 +134,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(true);
       try {
         const userRef = doc(db, 'users', user.uid);
-        const snap = await getDoc(userRef);
+        const adminRef = doc(db, 'admins', user.uid);
+        const [snap, adminSnap] = await Promise.all([getDoc(userRef), getDoc(adminRef)]);
         const isPrimaryAdmin =
           (user.email || '').toLowerCase() === PRIMARY_ADMIN_EMAIL.toLowerCase();
+        const hasAdminDoc = adminSnap.exists();
+        const adminDocData = hasAdminDoc
+          ? (adminSnap.data() as { position?: AdminPosition })
+          : null;
+        const resolvedAdminPosition: AdminPosition = isPrimaryAdmin
+          ? 'administrador'
+          : adminDocData?.position === 'asistente_tecnico' ||
+              (snap.exists() && snap.data().adminPosition === 'asistente_tecnico')
+            ? 'asistente_tecnico'
+            : 'administrador';
+
+        setIsAdminMember(isPrimaryAdmin || hasAdminDoc);
 
         if (!snap.exists()) {
-          if (!isPrimaryAdmin) {
+          if (!isPrimaryAdmin && !hasAdminDoc) {
             await signOut(auth).catch(() => {});
             setProfile(null);
+            setIsAdminMember(false);
             setLoading(false);
             setAuthError(
               'Tu cuenta no está registrada en la plataforma. Solicita tus credenciales a la Dirección Distrital.'
@@ -148,25 +166,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           try {
             await setDoc(userRef, {
               uid: user.uid,
-              email: user.email || PRIMARY_ADMIN_EMAIL,
-              displayName: user.displayName || 'Administrador Distrital',
-              dni: PRIMARY_ADMIN_USERNAME,
+              email: user.email || (isPrimaryAdmin ? PRIMARY_ADMIN_EMAIL : ''),
+              displayName:
+                user.displayName ||
+                (resolvedAdminPosition === 'asistente_tecnico'
+                  ? 'Asistente Técnico Distrital'
+                  : 'Administrador Distrital'),
+              dni: isPrimaryAdmin ? PRIMARY_ADMIN_USERNAME : '',
               role: 'admin',
-              adminPosition: 'administrador',
+              adminPosition: resolvedAdminPosition,
+              needsOnboarding: false,
               schoolId: '',
               schoolName: '',
-              saceCode: PRIMARY_ADMIN_USERNAME,
+              saceCode: isPrimaryAdmin ? PRIMARY_ADMIN_USERNAME : '',
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
             });
           } catch (err) {
             handleFirestoreError(err, OperationType.CREATE, `users/${user.uid}`);
           }
-        } else if (isPrimaryAdmin && snap.data().role !== 'admin') {
+        } else if (
+          (isPrimaryAdmin || hasAdminDoc) &&
+          (snap.data().role !== 'admin' ||
+            snap.data().needsOnboarding === true ||
+            (hasAdminDoc && snap.data().adminPosition !== resolvedAdminPosition))
+        ) {
           try {
             await updateDoc(userRef, {
               role: 'admin',
-              adminPosition: 'administrador',
+              adminPosition: resolvedAdminPosition,
+              needsOnboarding: false,
               updatedAt: serverTimestamp(),
             });
           } catch (err) {
@@ -174,22 +203,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
-        if (isPrimaryAdmin) {
-          const adminRef = doc(db, 'admins', user.uid);
-          const adminSnap = await getDoc(adminRef);
-          if (!adminSnap.exists()) {
-            try {
-              await setDoc(adminRef, {
-                uid: user.uid,
-                email: user.email || PRIMARY_ADMIN_EMAIL,
-                displayName: user.displayName || 'Administrador Distrital',
-                position: 'administrador',
-                addedBy: 'system',
-                createdAt: serverTimestamp(),
-              });
-            } catch (err) {
-              handleFirestoreError(err, OperationType.CREATE, `admins/${user.uid}`);
-            }
+        if (isPrimaryAdmin && !hasAdminDoc) {
+          try {
+            await setDoc(adminRef, {
+              uid: user.uid,
+              email: user.email || PRIMARY_ADMIN_EMAIL,
+              displayName: user.displayName || 'Administrador Distrital',
+              position: 'administrador',
+              addedBy: 'system',
+              createdAt: serverTimestamp(),
+            });
+          } catch (err) {
+            handleFirestoreError(err, OperationType.CREATE, `admins/${user.uid}`);
           }
         }
       } catch (err) {
@@ -253,10 +278,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     );
 
+    const adminDocPath = `admins/${firebaseUser.uid}`;
+    const isPrimaryUser =
+      (firebaseUser.email || '').toLowerCase() === PRIMARY_ADMIN_EMAIL.toLowerCase();
+    const unsubAdminDoc = onSnapshot(
+      doc(db, 'admins', firebaseUser.uid),
+      (snap) => {
+        setIsAdminMember(isPrimaryUser || snap.exists());
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, adminDocPath);
+      }
+    );
+
     return () => {
       unsubProfile();
       unsubReq();
       unsubSchools();
+      unsubAdminDoc();
     };
   }, [firebaseUser]);
 
@@ -503,6 +542,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         directorRequest,
         schools,
         assignedSchool,
+        isAdminMember,
         loading,
         authError,
         clearAuthError,

@@ -198,6 +198,7 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
   const [rejectingUid, setRejectingUid] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [reviewKind, setReviewKind] = useState<'annual' | 'parteMensual' | 'monthly'>('parteMensual');
+  const [reviewDistrict, setReviewDistrict] = useState<'all' | DistrictCode | 'unassigned'>('all');
   const [reviewLevel, setReviewLevel] = useState<'all' | EducationLevel>('all');
   const [reviewBasicaScope, setReviewBasicaScope] = useState<'all' | BasicaScope>('all');
   const [reviewCenterType, setReviewCenterType] = useState<CenterTypeFilter>('all');
@@ -211,6 +212,7 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
 
   // Consolidated export filters
   const [consKind, setConsKind] = useState<'annual' | 'parteMensual' | 'monthly'>('parteMensual');
+  const [consDistrict, setConsDistrict] = useState<'all' | DistrictCode | 'unassigned'>('all');
   const [consLevel, setConsLevel] = useState<EducationLevel>('basica');
   const [consBasicaScope, setConsBasicaScope] = useState<BasicaScope>('c1_2_3');
   const [consCenterType, setConsCenterType] = useState<CenterTypeFilter>('all');
@@ -839,10 +841,20 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
     );
   }, [schools, schoolDistrictFilter, schoolCenterTypeFilter, schoolSearch, schoolContacts]);
 
+  const schoolMatchesDistrict = (
+    sch: Pick<School, 'district'> | undefined,
+    filter: 'all' | DistrictCode | 'unassigned'
+  ): boolean => {
+    if (filter === 'all') return true;
+    if (filter === 'unassigned') return !sch?.district;
+    return sch?.district === filter;
+  };
+
   const filteredReviewAnnuals = useMemo(() => {
     return yearAnnuals.filter((r) => {
       if (reviewLevel !== 'all' && r.level !== reviewLevel) return false;
       const sch = schools.find((s) => s.id === r.schoolId);
+      if (!schoolMatchesDistrict(sch, reviewDistrict)) return false;
       if (reviewLevel === 'basica' && reviewBasicaScope !== 'all') {
         if (getBasicaScope(sch) !== reviewBasicaScope) return false;
       }
@@ -852,13 +864,14 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
       if (reviewStatus !== 'all' && r.status !== reviewStatus) return false;
       return true;
     });
-  }, [yearAnnuals, reviewLevel, reviewBasicaScope, reviewCenterType, reviewStatus, schools]);
+  }, [yearAnnuals, reviewDistrict, reviewLevel, reviewBasicaScope, reviewCenterType, reviewStatus, schools]);
 
   const filteredReviewPartes = useMemo(() => {
     return yearPartesMensuales.filter((r) => {
       if (r.month !== reviewMonth) return false;
       if (reviewLevel !== 'all' && r.level !== reviewLevel) return false;
       const sch = schools.find((s) => s.id === r.schoolId);
+      if (!schoolMatchesDistrict(sch, reviewDistrict)) return false;
       if (reviewLevel === 'basica' && reviewBasicaScope !== 'all') {
         if (getBasicaScope(sch) !== reviewBasicaScope) return false;
       }
@@ -868,13 +881,14 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
       if (reviewStatus !== 'all' && r.status !== reviewStatus) return false;
       return true;
     });
-  }, [yearPartesMensuales, reviewMonth, reviewLevel, reviewBasicaScope, reviewCenterType, reviewStatus, schools]);
+  }, [yearPartesMensuales, reviewMonth, reviewDistrict, reviewLevel, reviewBasicaScope, reviewCenterType, reviewStatus, schools]);
 
   const filteredReviewMonthlies = useMemo(() => {
     return yearMonthlies.filter((r) => {
       if (r.month !== reviewMonth) return false;
       if (reviewLevel !== 'all' && r.level !== reviewLevel) return false;
       const sch = schools.find((s) => s.id === r.schoolId);
+      if (!schoolMatchesDistrict(sch, reviewDistrict)) return false;
       if (reviewLevel === 'basica' && reviewBasicaScope !== 'all') {
         if (getBasicaScope(sch) !== reviewBasicaScope) return false;
       }
@@ -884,11 +898,12 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
       if (reviewStatus !== 'all' && r.status !== reviewStatus) return false;
       return true;
     });
-  }, [yearMonthlies, reviewMonth, reviewLevel, reviewBasicaScope, reviewCenterType, reviewStatus, schools]);
+  }, [yearMonthlies, reviewMonth, reviewDistrict, reviewLevel, reviewBasicaScope, reviewCenterType, reviewStatus, schools]);
 
   // Consolidated computation
   const availableConsSchools = useMemo(() => {
     return schools.filter((s) => {
+      if (!schoolMatchesDistrict(s, consDistrict)) return false;
       if (!s.levels.includes(consLevel)) return false;
       if (consLevel === 'basica' && consBasicaScope !== 'c1_2_3') {
         if (!schoolMatchesBasicaScope(s, consBasicaScope)) return false;
@@ -898,7 +913,7 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
       }
       return true;
     });
-  }, [schools, consLevel, consBasicaScope, consCenterType]);
+  }, [schools, consDistrict, consLevel, consBasicaScope, consCenterType]);
 
   const effectiveConsBasicaScope: BasicaScope | undefined = useMemo(() => {
     if (consLevel !== 'basica') return undefined;
@@ -918,6 +933,7 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
         return false;
       if (consSector !== 'all' && r.sector !== consSector) return false;
       const sch = schools.find((s) => s.id === r.schoolId);
+      if (!schoolMatchesDistrict(sch, consDistrict)) return false;
       if (consCenterType !== 'all' && !schoolMatchesCenterTypeFilter(sch, consCenterType)) {
         return false;
       }
@@ -928,7 +944,7 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
       }
       return true;
     });
-  }, [yearAnnuals, consLevel, consBasicaScope, consCenterType, consScope, consSector, consSchoolId, schools]);
+  }, [yearAnnuals, consDistrict, consLevel, consBasicaScope, consCenterType, consScope, consSector, consSchoolId, schools]);
 
   const consolidatedParteMensualSubset = useMemo(() => {
     return yearPartesMensuales.filter((r) => {
@@ -937,6 +953,7 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
       if (consScope === 'submitted_and_approved' && r.status !== 'approved' && r.status !== 'submitted')
         return false;
       const sch = schools.find((s) => s.id === r.schoolId);
+      if (!schoolMatchesDistrict(sch, consDistrict)) return false;
       if (consCenterType !== 'all' && !schoolMatchesCenterTypeFilter(sch, consCenterType)) {
         return false;
       }
@@ -947,7 +964,7 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
       }
       return true;
     });
-  }, [yearPartesMensuales, consMonth, consLevel, consBasicaScope, consCenterType, consScope, consSchoolId, schools]);
+  }, [yearPartesMensuales, consMonth, consDistrict, consLevel, consBasicaScope, consCenterType, consScope, consSchoolId, schools]);
 
   const consolidatedMonthlySubset = useMemo(() => {
     return yearMonthlies.filter((r) => {
@@ -956,6 +973,7 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
       if (consScope === 'submitted_and_approved' && r.status !== 'approved' && r.status !== 'submitted')
         return false;
       const sch = schools.find((s) => s.id === r.schoolId);
+      if (!schoolMatchesDistrict(sch, consDistrict)) return false;
       if (consCenterType !== 'all' && !schoolMatchesCenterTypeFilter(sch, consCenterType)) {
         return false;
       }
@@ -966,7 +984,7 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
       }
       return true;
     });
-  }, [yearMonthlies, consMonth, consLevel, consBasicaScope, consCenterType, consScope, consSchoolId, schools]);
+  }, [yearMonthlies, consMonth, consDistrict, consLevel, consBasicaScope, consCenterType, consScope, consSchoolId, schools]);
 
   const consSchoolCount =
     consKind === 'annual'
@@ -985,22 +1003,39 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
         };
       }
     }
+    const districtLabel =
+      consDistrict === 'all'
+        ? 'DISTRITAL'
+        : consDistrict === 'unassigned'
+        ? 'SIN DISTRITO'
+        : getDistrictLabel(consDistrict).toUpperCase();
+    const districtCodeLabel =
+      consDistrict === 'all'
+        ? 'CONSOLIDADO'
+        : consDistrict === 'unassigned'
+        ? 'SIN DISTRITO'
+        : `DISTRITO ${consDistrict}`;
     const centerTypeSuffix =
       consCenterType !== 'all' ? ` · ${getCenterTypeFilterLabel(consCenterType)}` : '';
     return {
       id: 'distrito_18b',
-      saceCode: 'DISTRITO 18-B',
-      name: `CONSOLIDADO DISTRITAL N° 18-B, OMOA${centerTypeSuffix} (${consSchoolCount} centros)`,
+      saceCode: districtCodeLabel,
+      name: `CONSOLIDADO ${districtLabel}, OMOA${centerTypeSuffix} (${consSchoolCount} centros)`,
       community: 'Omoa, Cortés',
       levels: [consLevel],
       ...(effectiveConsBasicaScope ? { basicaScope: effectiveConsBasicaScope } : {}),
       sector: consSector === 'no_gubernamental' ? 'no_gubernamental' : 'gubernamental',
       modality: 'presencial',
       directorUid: profile.uid,
-      directorDisplayName: 'Dirección Distrital N° 18-B',
+      directorDisplayName:
+        consDistrict === '18'
+          ? 'Dirección Distrital N° 18'
+          : consDistrict === '18-B'
+          ? 'Dirección Distrital N° 18-B'
+          : 'Dirección Distrital',
       active: true,
     };
-  }, [consSchoolId, schools, consSchoolCount, consLevel, effectiveConsBasicaScope, consCenterType, consSector, profile.uid]);
+  }, [consSchoolId, schools, consSchoolCount, consDistrict, consLevel, effectiveConsBasicaScope, consCenterType, consSector, profile.uid]);
 
   const consolidatedBasicaData: BasicaAnnualData = useMemo(
     () => aggregateBasicaReports(consolidatedAnnualSubset),
@@ -2204,6 +2239,22 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                 </select>
               )}
               <select
+                value={reviewDistrict}
+                onChange={(e) =>
+                  setReviewDistrict(e.target.value as 'all' | DistrictCode | 'unassigned')
+                }
+                aria-label="Filtrar por distrito escolar"
+                className="px-2.5 py-1.5 border border-slate-300 bg-white"
+              >
+                <option value="all">Todos los distritos</option>
+                {DISTRICT_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+                <option value="unassigned">Sin distrito asignado</option>
+              </select>
+              <select
                 value={reviewLevel}
                 onChange={(e) => {
                   const lvl = e.target.value as 'all' | EducationLevel;
@@ -2752,7 +2803,27 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 pt-2 border-t border-slate-200 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-3 pt-2 border-t border-slate-200 text-xs">
+              <div>
+                <label className="block font-medium text-slate-700 mb-1">Distrito Escolar</label>
+                <select
+                  value={consDistrict}
+                  onChange={(e) => {
+                    setConsDistrict(e.target.value as 'all' | DistrictCode | 'unassigned');
+                    setConsSchoolId('all');
+                  }}
+                  className="w-full px-2.5 py-2 border border-slate-300 bg-white"
+                >
+                  <option value="all">Todos los distritos</option>
+                  {DISTRICT_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                  <option value="unassigned">Sin distrito asignado</option>
+                </select>
+              </div>
+
               <div>
                 <label className="block font-medium text-slate-700 mb-1">Nivel Educativo</label>
                 <select
@@ -2874,7 +2945,13 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                   onChange={(e) => setConsSchoolId(e.target.value)}
                   className="w-full px-2.5 py-2 border border-slate-300 bg-white"
                 >
-                  <option value="all">Todo el Distrito N° 18-B</option>
+                  <option value="all">
+                    {consDistrict === 'all'
+                      ? 'Todos los distritos'
+                      : consDistrict === 'unassigned'
+                      ? 'Todos (sin distrito)'
+                      : `Todo el ${getDistrictLabel(consDistrict)}`}
+                  </option>
                   {availableConsSchools.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name}

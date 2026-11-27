@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import {
   deleteDoc,
+  deleteField,
   doc,
   getDoc,
   serverTimestamp,
@@ -283,7 +284,7 @@ export function AdminUsersSection({
           displayName: cleanName,
           dni: cleanDni,
           role: effectiveRole,
-          adminPosition: 'administrador',
+          adminPosition: deleteField(),
           needsOnboarding:
             effectiveRole === 'pending' ? Boolean(editingUser.needsOnboarding) : false,
           schoolId: nextSchoolId,
@@ -631,7 +632,7 @@ export function AdminUsersSection({
         </div>
 
         <p className="text-[11px] text-slate-500">
-          Los Asistentes Técnicos de la Dirección Distrital operan con permisos completos de Administrador.
+          Los Asistentes Técnicos de la Dirección Distrital operan con permisos completos de Administrador, incluido el acceso a Reportes estadísticos.
         </p>
       </div>
 
@@ -846,7 +847,7 @@ export function AdminUsersSection({
             </h2>
             <p className="text-xs text-slate-600 mt-1">
               Los Asistentes Técnicos se registran automáticamente con rol de{' '}
-              <strong>Administrador</strong> para revisar cuadros, gestionar fechas límite, validar cumplimiento y exportar consolidados sin cerrar tu sesión actual.
+              <strong>Administrador</strong> para consultar reportes estadísticos, revisar cuadros, gestionar fechas límite, validar cumplimiento y exportar consolidados sin cerrar tu sesión actual.
             </p>
           </div>
 
@@ -1096,7 +1097,7 @@ export function AdminUsersSection({
                 ) : (
                   <p className="text-[11px] text-slate-600 pb-1">
                     Todas las cuentas creadas recibirán privilegios completos de{' '}
-                    <strong>Administrador Distrital (Asistente Técnico)</strong>.
+                    <strong>Administrador Distrital (Asistente Técnico)</strong>, con acceso a Reportes estadísticos, revisión y consolidados.
                   </p>
                 )}
               </div>
