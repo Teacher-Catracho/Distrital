@@ -22,7 +22,7 @@ import type {
   School,
   UserProfile,
 } from '../types/sace';
-import { getTodayIsoDate } from '../utils/saceCalculations';
+import { getTodayIsoDate, normalizeDueTime } from '../utils/saceCalculations';
 
 export function buildComplianceDocId(activityId: string, schoolId: string): string {
   return `${activityId}_${schoolId}`;
@@ -72,6 +72,7 @@ export interface SaveDistrictActivityInput {
   title: string;
   description: string;
   dueDate: string;
+  dueTime?: string;
   assignmentMode: ActivityAssignmentMode;
   targetLevels: EducationLevel[];
   targetBasicaScopes: BasicaScope[];
@@ -90,6 +91,7 @@ export async function saveDistrictActivity(input: SaveDistrictActivityInput): Pr
 
   const sanitizedTitle = input.title.trim().slice(0, 160);
   const sanitizedDescription = input.description.trim().slice(0, 600);
+  const sanitizedDueTime = normalizeDueTime(input.dueTime);
   const sanitizedSchoolIds = input.targetSchoolIds.slice(0, 200);
 
   if (input.editingActivity) {
@@ -101,6 +103,7 @@ export async function saveDistrictActivity(input: SaveDistrictActivityInput): Pr
         title: sanitizedTitle,
         description: sanitizedDescription,
         dueDate: input.dueDate,
+        dueTime: sanitizedDueTime,
         assignmentMode: input.assignmentMode,
         targetLevels: input.targetLevels,
         targetBasicaScopes: input.targetBasicaScopes,
@@ -122,6 +125,7 @@ export async function saveDistrictActivity(input: SaveDistrictActivityInput): Pr
       title: sanitizedTitle,
       description: sanitizedDescription,
       dueDate: input.dueDate,
+      dueTime: sanitizedDueTime,
       assignmentMode: input.assignmentMode,
       targetLevels: input.targetLevels,
       targetBasicaScopes: input.targetBasicaScopes,

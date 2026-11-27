@@ -411,6 +411,7 @@ export interface DistrictActivity {
   title: string;
   description: string;
   dueDate: string; // YYYY-MM-DD
+  dueTime?: string; // HH:mm (24h, default 23:59)
   assignmentMode: ActivityAssignmentMode;
   targetLevels: EducationLevel[];
   targetBasicaScopes: BasicaScope[];

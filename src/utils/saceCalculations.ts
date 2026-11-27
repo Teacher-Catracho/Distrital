@@ -1231,10 +1231,23 @@ export function getTodayIsoDate(): string {
 
 export type DeadlineUrgency = 'completed' | 'overdue' | 'due_soon' | 'pending';
 
+export function normalizeDueTime(dueTime?: string): string {
+  if (dueTime && /^([01]\d|2[0-3]):[0-5]\d$/.test(dueTime.trim())) {
+    return dueTime.trim();
+  }
+  return '23:59';
+}
+
+export function buildActivityDueDateTime(dueDate: string, dueTime?: string): string {
+  return `${dueDate}T${normalizeDueTime(dueTime)}`;
+}
+
 export function getActivityDeadlineInfo(
   dueDate: string,
   completed: boolean,
-  todayIso = getTodayIsoDate()
+  todayIso = getTodayIsoDate(),
+  dueTime?: string,
+  nowMs = Date.now()
 ): { state: DeadlineUrgency; diffDays: number; label: string } {
   const target = new Date(`${dueDate}T00:00:00`);
   const today = new Date(`${todayIso}T00:00:00`);
@@ -1245,6 +1258,11 @@ export function getActivityDeadlineInfo(
   if (completed) {
     return { state: 'completed', diffDays, label: 'Cumplido' };
   }
+
+  const effectiveTime = normalizeDueTime(dueTime);
+  const exactTargetMs = new Date(`${dueDate}T${effectiveTime}:00`).getTime();
+  const isPastExact = !Number.isNaN(exactTargetMs) && exactTargetMs <= nowMs;
+
   if (diffDays < 0) {
     const abs = Math.abs(diffDays);
     return {
@@ -1254,7 +1272,18 @@ export function getActivityDeadlineInfo(
     };
   }
   if (diffDays === 0) {
-    return { state: 'due_soon', diffDays, label: 'Vence hoy' };
+    if (isPastExact) {
+      return {
+        state: 'overdue',
+        diffDays,
+        label: dueTime ? `Venció hoy (${effectiveTime})` : 'Venció hoy',
+      };
+    }
+    return {
+      state: 'due_soon',
+      diffDays,
+      label: dueTime ? `Vence hoy (${effectiveTime})` : 'Vence hoy',
+    };
   }
   if (diffDays <= 3) {
     return {
@@ -1276,6 +1305,14 @@ export function formatShortDueDate(isoDate: string): string {
   const monthNames = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
   const monthLabel = monthNames[Number(m) - 1] || m;
   return `${Number(d)} ${monthLabel} ${y}`;
+}
+
+export function formatDueDateTime(isoDate: string, dueTime?: string): string {
+  const shortDate = formatShortDueDate(isoDate);
+  if (!dueTime || !/^([01]\d|2[0-3]):[0-5]\d$/.test(dueTime.trim())) {
+    return shortDate;
+  }
+  return `${shortDate} · ${dueTime.trim()}`;
 }
 
 export function getDefaultMonthDeadlineStr(year: number, month: number): string {

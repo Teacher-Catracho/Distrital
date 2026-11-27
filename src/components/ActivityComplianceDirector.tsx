@@ -15,6 +15,8 @@ import type {
 } from '../types/sace';
 import {
   PARCIALES,
+  buildActivityDueDateTime,
+  formatDueDateTime,
   formatShortDueDate,
   getActivityDeadlineInfo,
   getDefaultParcial,
@@ -66,7 +68,7 @@ export function ActivityComplianceDirector({
       .map((act) => {
         const comp = complianceByActivity.get(act.id);
         const completed = comp?.completed === true;
-        const deadline = getActivityDeadlineInfo(act.dueDate, completed, todayIso);
+        const deadline = getActivityDeadlineInfo(act.dueDate, completed, todayIso, act.dueTime);
         return { act, comp, completed, deadline };
       });
 
@@ -80,7 +82,9 @@ export function ActivityComplianceDirector({
     return items.sort((a, b) => {
       const rankDiff = priorityRank[a.deadline.state] - priorityRank[b.deadline.state];
       if (rankDiff !== 0) return rankDiff;
-      return a.act.dueDate.localeCompare(b.act.dueDate);
+      return buildActivityDueDateTime(a.act.dueDate, a.act.dueTime).localeCompare(
+        buildActivityDueDateTime(b.act.dueDate, b.act.dueTime)
+      );
     });
   }, [yearActivities, selectedParcial, complianceByActivity, todayIso]);
 
@@ -296,7 +300,7 @@ export function ActivityComplianceDirector({
                     <td className="px-4 py-3.5 whitespace-nowrap">
                       <span className="inline-flex items-center gap-1.5 font-mono text-slate-800">
                         <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                        {formatShortDueDate(act.dueDate)}
+                        {formatDueDateTime(act.dueDate, act.dueTime)}
                       </span>
                     </td>
                     <td className="px-4 py-3.5 whitespace-nowrap">

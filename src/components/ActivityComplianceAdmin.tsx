@@ -33,12 +33,15 @@ import {
 import {
   COMPLIANCE_GROUPS,
   PARCIALES,
+  buildActivityDueDateTime,
+  formatDueDateTime,
   formatShortDueDate,
   getActivityDeadlineInfo,
   getBasicaScope,
   getDefaultParcial,
   getParcialLabel,
   getTodayIsoDate,
+  normalizeDueTime,
   schoolMatchesComplianceGroup,
   type SchoolComplianceGroupKey,
 } from '../utils/saceCalculations';
@@ -98,6 +101,7 @@ export function ActivityComplianceAdmin({
   const [formDescription, setFormDescription] = useState('');
   const [formParcial, setFormParcial] = useState<ParcialNumber>(getDefaultParcial());
   const [formDueDate, setFormDueDate] = useState(getTodayIsoDate());
+  const [formDueTime, setFormDueTime] = useState('23:59');
   const [formAssignmentMode, setFormAssignmentMode] = useState<ActivityAssignmentMode>('levels');
   const [formGroups, setFormGroups] = useState<SchoolComplianceGroupKey[]>([
     'prebasica',
@@ -142,7 +146,11 @@ export function ActivityComplianceAdmin({
     () =>
       activities
         .filter((a) => a.year === year && a.active !== false)
-        .sort((a, b) => a.dueDate.localeCompare(b.dueDate)),
+        .sort((a, b) =>
+          buildActivityDueDateTime(a.dueDate, a.dueTime).localeCompare(
+            buildActivityDueDateTime(b.dueDate, b.dueTime)
+          )
+        ),
     [activities, year]
   );
 
@@ -297,6 +305,7 @@ export function ActivityComplianceAdmin({
     setFormDescription('');
     setFormParcial(selectedParcial);
     setFormDueDate(getTodayIsoDate());
+    setFormDueTime('23:59');
     setFormAssignmentMode('levels');
     setFormGroups(['prebasica', 'basica_c1_2', 'basica_c1_2_3', 'media']);
     setFormSchoolIds(activeSchools.map((s) => s.id));
@@ -312,6 +321,7 @@ export function ActivityComplianceAdmin({
     setFormDescription(act.description);
     setFormParcial(act.parcial);
     setFormDueDate(act.dueDate);
+    setFormDueTime(normalizeDueTime(act.dueTime));
     setFormAssignmentMode(act.assignmentMode);
 
     const inferredGroups: SchoolComplianceGroupKey[] = [];
@@ -348,6 +358,10 @@ export function ActivityComplianceAdmin({
       setFormError('Selecciona una fecha máxima de entrega válida.');
       return;
     }
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(formDueTime)) {
+      setFormError('Selecciona una hora de entrega máxima válida.');
+      return;
+    }
     if (computedTargetSchoolIds.length === 0) {
       setFormError('Selecciona al menos un nivel educativo o centro educativo.');
       return;
@@ -380,6 +394,7 @@ export function ActivityComplianceAdmin({
         title,
         description: formDescription,
         dueDate: formDueDate,
+        dueTime: formDueTime,
         assignmentMode: formAssignmentMode,
         targetLevels,
         targetBasicaScopes,
@@ -715,7 +730,9 @@ export function ActivityComplianceAdmin({
                   </th>
 
                   {parcialActivities.map((act) => {
-                    const pastDue = act.dueDate < todayIso;
+                    const pastDue =
+                      getActivityDeadlineInfo(act.dueDate, false, todayIso, act.dueTime).state ===
+                      'overdue';
                     const assignedCount = act.targetSchoolIds.length;
                     const doneForAct = activeSchools.filter(
                       (s) =>
@@ -741,7 +758,7 @@ export function ActivityComplianceAdmin({
                           </button>
                           <div className="flex items-center justify-between gap-1 text-[10px] text-blue-100 font-mono">
                             <span className={pastDue ? 'text-amber-300' : 'text-blue-200'}>
-                              {formatShortDueDate(act.dueDate)}
+                              {formatDueDateTime(act.dueDate, act.dueTime)}
                             </span>
                             <span>
                               {doneForAct}/{assignedCount}
@@ -995,17 +1012,39 @@ export function ActivityComplianceAdmin({
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="space-y-1">
-                  <label className="font-medium text-slate-700 block">
-                    Fecha máxima de entrega *
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={formDueDate}
-                    onChange={(e) => setFormDueDate(e.target.value)}
-                    className="w-full px-3 py-2 font-mono border border-slate-300 bg-white focus:outline-none focus:border-blue-700"
-                  />
+                <div className="space-y-2.5">
+                  <div className="space-y-1">
+                    <label
+                      htmlFor="activity-due-date"
+                      className="font-medium text-slate-700 block"
+                    >
+                      Fecha máxima de entrega *
+                    </label>
+                    <input
+                      id="activity-due-date"
+                      type="date"
+                      required
+                      value={formDueDate}
+                      onChange={(e) => setFormDueDate(e.target.value)}
+                      className="w-full px-3 py-2 font-mono border border-slate-300 bg-white focus:outline-none focus:border-blue-700"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label
+                      htmlFor="activity-due-time"
+                      className="font-medium text-slate-700 block"
+                    >
+                      Hora de entrega máxima *
+                    </label>
+                    <input
+                      id="activity-due-time"
+                      type="time"
+                      required
+                      value={formDueTime}
+                      onChange={(e) => setFormDueTime(e.target.value)}
+                      className="w-full px-3 py-2 font-mono border border-slate-300 bg-white focus:outline-none focus:border-blue-700"
+                    />
+                  </div>
                 </div>
 
                 <div className="sm:col-span-2 space-y-1">
@@ -1240,7 +1279,7 @@ export function ActivityComplianceAdmin({
                   <span aria-hidden="true">·</span>
                   <span className="inline-flex items-center gap-1 font-mono">
                     <Calendar className="w-3 h-3" />
-                    Fecha límite: {formatShortDueDate(detailActivity.dueDate)}
+                    Fecha límite: {formatDueDateTime(detailActivity.dueDate, detailActivity.dueTime)}
                   </span>
                   <span aria-hidden="true">·</span>
                   <span className="font-mono tabular-nums">
@@ -1320,7 +1359,8 @@ export function ActivityComplianceAdmin({
                     const deadline = getActivityDeadlineInfo(
                       detailActivity.dueDate,
                       isCompleted,
-                      todayIso
+                      todayIso,
+                      detailActivity.dueTime
                     );
 
                     return (

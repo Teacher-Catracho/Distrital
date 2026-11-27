@@ -285,7 +285,7 @@ service cloud.firestore {
           'active', 'createdByUid', 'createdAt', 'updatedAt'
         ]) &&
         data.keys().hasOnly([
-          'year', 'parcial', 'title', 'description', 'dueDate', 'assignmentMode',
+          'year', 'parcial', 'title', 'description', 'dueDate', 'dueTime', 'assignmentMode',
           'targetLevels', 'targetBasicaScopes', 'targetSchoolIds', 'assignedDirectorUids',
           'active', 'createdByUid', 'createdAt', 'updatedAt'
         ]) &&
@@ -295,6 +295,10 @@ service cloud.firestore {
         data.description is string && data.description.size() <= 600 &&
         data.dueDate is string && data.dueDate.size() == 10 &&
         data.dueDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+        (!('dueTime' in data) || (
+          data.dueTime is string && data.dueTime.size() == 5 &&
+          data.dueTime.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$')
+        )) &&
         data.assignmentMode in ['levels', 'schools'] &&
         data.targetLevels is list &&
         data.targetLevels.size() <= 3 &&

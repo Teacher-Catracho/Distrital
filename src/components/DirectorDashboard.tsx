@@ -16,6 +16,8 @@ import type {
 import {
   DEFAULT_YEAR,
   MONTHS,
+  buildActivityDueDateTime,
+  formatDueDateTime,
   formatShortDueDate,
   getActivityDeadlineInfo,
   getParcialLabel,
@@ -211,9 +213,13 @@ export function DirectorDashboard({
       .filter((a) => a.targetSchoolIds.includes(school.id) && !completedSet.has(a.id))
       .map((a) => ({
         activity: a,
-        deadline: getActivityDeadlineInfo(a.dueDate, false, todayIso),
+        deadline: getActivityDeadlineInfo(a.dueDate, false, todayIso, a.dueTime),
       }))
-      .sort((a, b) => a.activity.dueDate.localeCompare(b.activity.dueDate));
+      .sort((a, b) =>
+        buildActivityDueDateTime(a.activity.dueDate, a.activity.dueTime).localeCompare(
+          buildActivityDueDateTime(b.activity.dueDate, b.activity.dueTime)
+        )
+      );
   }, [activities, activityCompliances, school.id]);
 
   return (
@@ -389,7 +395,9 @@ export function DirectorDashboard({
                       <p className="text-xs font-semibold text-slate-900">{activity.title}</p>
                       <p className="text-[11px] text-slate-500">
                         {getParcialLabel(activity.parcial)} · Fecha máxima:{' '}
-                        <span className="font-mono">{formatShortDueDate(activity.dueDate)}</span>
+                        <span className="font-mono">
+                          {formatDueDateTime(activity.dueDate, activity.dueTime)}
+                        </span>
                       </p>
                     </div>
                     <span

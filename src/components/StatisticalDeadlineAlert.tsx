@@ -12,6 +12,7 @@ import type {
 } from '../types/sace';
 import {
   MONTHS,
+  buildActivityDueDateTime,
   evaluate48HourWindow,
   formatDateTimeEs,
   getDefaultMonthDeadlineStr,
@@ -198,13 +199,14 @@ export function StatisticalDeadlineAlert({
     for (const act of activities) {
       if (act.year !== year || act.active === false) continue;
       if (!act.targetSchoolIds.includes(school.id) || completedSet.has(act.id)) continue;
-      const actWindow = evaluate48HourWindow(act.dueDate, nowMs);
+      const actDueDateTime = buildActivityDueDateTime(act.dueDate, act.dueTime);
+      const actWindow = evaluate48HourWindow(actDueDateTime, nowMs);
       if (actWindow?.isWithin48Hours) {
         items.push({
           id: `act_${act.id}`,
           title: act.title,
           detail: `${getParcialLabel(act.parcial)} · Evidencia pendiente de validación`,
-          deadlineLabel: formatDateTimeEs(`${act.dueDate}T23:59`),
+          deadlineLabel: formatDateTimeEs(actDueDateTime),
           remainingLabel: actWindow.formattedRemaining,
           hoursRemaining: actWindow.hoursRemaining,
           actionLabel: 'Ver actividad',
