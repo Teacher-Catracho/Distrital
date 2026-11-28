@@ -4,6 +4,7 @@ import {
   createUserWithEmailAndPassword,
   initializeAuth,
   inMemoryPersistence,
+  signInWithEmailAndPassword,
   signOut,
   updateProfile,
 } from 'firebase/auth';
@@ -139,7 +140,7 @@ async function provisionAuthAccountWithoutSessionImpact(
   authEmail: string,
   password: string,
   displayName: string
-): Promise<{ uid: string; email: string }> {
+): Promise<{ uid: string; email: string; recovered?: boolean }> {
   const appName = `sace-provisioner-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const secondaryApp = initializeApp(resolvedFirebaseConfig, appName);
   const secondaryAuth = initializeAuth(secondaryApp, {
@@ -147,18 +148,40 @@ async function provisionAuthAccountWithoutSessionImpact(
   });
 
   try {
-    const cred = await createUserWithEmailAndPassword(secondaryAuth, authEmail, password);
     try {
-      if (displayName.trim()) {
-        await updateProfile(cred.user, { displayName: displayName.trim() });
+      const cred = await createUserWithEmailAndPassword(secondaryAuth, authEmail, password);
+      try {
+        if (displayName.trim()) {
+          await updateProfile(cred.user, { displayName: displayName.trim() });
+        }
+      } catch {
+        // Non-blocking if displayName update fails
       }
-    } catch {
-      // Non-blocking if displayName update fails
+      return {
+        uid: cred.user.uid,
+        email: cred.user.email || authEmail,
+      };
+    } catch (createErr) {
+      const code =
+        typeof createErr === 'object' && createErr !== null && 'code' in createErr
+          ? String((createErr as { code?: unknown }).code || '')
+          : '';
+      if (code === 'auth/email-already-in-use') {
+        try {
+          const existingCred = await signInWithEmailAndPassword(secondaryAuth, authEmail, password);
+          return {
+            uid: existingCred.user.uid,
+            email: existingCred.user.email || authEmail,
+            recovered: true,
+          };
+        } catch {
+          throw new Error(
+            'La cuenta ya existe en Firebase Authentication sin perfil en Firestore. Ingresa su contraseña actual para recuperarla aquí, o elimínala primero en Firebase Console → Authentication → Users.'
+          );
+        }
+      }
+      throw createErr;
     }
-    return {
-      uid: cred.user.uid,
-      email: cred.user.email || authEmail,
-    };
   } finally {
     await signOut(secondaryAuth).catch(() => {});
     await deleteApp(secondaryApp).catch(() => {});
@@ -327,7 +350,7 @@ export async function provisionBulkUsersWithDefaultPassword(params: {
       continue;
     }
 
-    let createdAuth: { uid: string; email: string };
+    let createdAuth: { uid: string; email: string; recovered?: boolean };
     try {
       createdAuth = await provisionAuthAccountWithoutSessionImpact(
         resolved.authEmail,
@@ -385,7 +408,9 @@ export async function provisionBulkUsersWithDefaultPassword(params: {
           displayName: cleanName,
           authIdentifier: resolved.loginDisplay,
           status: 'created',
-          message: 'Asistente Técnico (Administrador) creado correctamente.',
+          message: createdAuth.recovered
+            ? 'Cuenta existente recuperada y habilitada como Asistente Técnico.'
+            : 'Asistente Técnico (Administrador) creado correctamente.',
           schoolAction: 'none',
         });
       } else {
@@ -419,7 +444,11 @@ export async function provisionBulkUsersWithDefaultPassword(params: {
           displayName: prelinkedSchoolName || 'Primer ingreso pendiente',
           authIdentifier: canonicalSaceCode || resolved.loginDisplay,
           status: 'created',
-          message: matchedSchool
+          message: createdAuth.recovered
+            ? matchedSchool
+              ? `Cuenta recuperada y vinculada a (${matchedSchool.name}). Confirmará su perfil al iniciar sesión.`
+              : 'Cuenta existente recuperada en la plataforma. Lista para completar ingreso.'
+            : matchedSchool
             ? `Cuenta creada (${matchedSchool.name}). Completará su perfil al iniciar sesión.`
             : 'Cuenta creada. El director registrará su nombre, teléfono, comunidad y niveles al ingresar por primera vez.',
           schoolAction: matchedSchool ? 'linked_existing' : 'none',

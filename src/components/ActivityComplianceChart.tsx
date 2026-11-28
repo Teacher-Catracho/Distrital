@@ -13,10 +13,18 @@ import {
 import { ArrowRight, BarChart3, ListChecks } from 'lucide-react';
 import type {
   ActivityCompliance,
+  AnnualReport,
   DistrictActivity,
+  DistrictDeadlines,
+  MonthlyReport,
   ParcialNumber,
+  ParteMensualReport,
   School,
 } from '../types/sace';
+import {
+  buildDeadlineLinkedColumns,
+  evaluateDeadlineColumnForSchool,
+} from '../utils/deadlineCompliance';
 import {
   PARCIALES,
   getDefaultParcial,
@@ -30,6 +38,10 @@ interface ActivityComplianceChartProps {
   schools: School[];
   activities: DistrictActivity[];
   compliances: ActivityCompliance[];
+  deadlines?: DistrictDeadlines | null;
+  parteMensualReports?: ParteMensualReport[];
+  monthlyReports?: MonthlyReport[];
+  annualReports?: AnnualReport[];
   onOpenCompliance?: () => void;
 }
 
@@ -130,6 +142,10 @@ export function ActivityComplianceChart({
   schools,
   activities,
   compliances,
+  deadlines = null,
+  parteMensualReports = [],
+  monthlyReports = [],
+  annualReports = [],
   onOpenCompliance,
 }: ActivityComplianceChartProps) {
   const currentParcial = getDefaultParcial();
@@ -147,6 +163,14 @@ export function ActivityComplianceChart({
         (a) => a.year === year && a.parcial === selectedParcial && a.active !== false
       ),
     [activities, year, selectedParcial]
+  );
+
+  const periodDeadlineColumns = useMemo(
+    () =>
+      buildDeadlineLinkedColumns(year, deadlines, activeSchools).filter(
+        (c) => c.parcial === selectedParcial
+      ),
+    [year, deadlines, activeSchools, selectedParcial]
   );
 
   const complianceMap = useMemo(() => {
@@ -174,6 +198,20 @@ export function ActivityComplianceChart({
             completed++;
           }
         }
+        for (const col of periodDeadlineColumns) {
+          expected++;
+          if (
+            evaluateDeadlineColumnForSchool(
+              col,
+              s,
+              parteMensualReports,
+              monthlyReports,
+              annualReports
+            ).completed
+          ) {
+            completed++;
+          }
+        }
       }
 
       const pending = expected - completed;
@@ -191,7 +229,15 @@ export function ActivityComplianceChart({
         color: grp.color,
       };
     });
-  }, [activeSchools, periodActivities, complianceMap]);
+  }, [
+    activeSchools,
+    periodActivities,
+    periodDeadlineColumns,
+    complianceMap,
+    parteMensualReports,
+    monthlyReports,
+    annualReports,
+  ]);
 
   const totals = useMemo(() => {
     const expected = chartData.reduce((sum, d) => sum + d.expected, 0);
@@ -213,8 +259,12 @@ export function ActivityComplianceChart({
             Comparativo entre Prebásica, Básica I-II, Básica III Ciclo y Media ·{' '}
             {getParcialLabel(selectedParcial)}
             {selectedParcial === currentParcial ? ' (Periodo actual)' : ''}
-            {periodActivities.length > 0
-              ? ` · ${periodActivities.length} ${periodActivities.length === 1 ? 'actividad' : 'actividades'}`
+            {periodActivities.length + periodDeadlineColumns.length > 0
+              ? ` · ${periodActivities.length + periodDeadlineColumns.length} ${
+                  periodActivities.length + periodDeadlineColumns.length === 1
+                    ? 'entrega'
+                    : 'entregas'
+                }`
               : ''}
           </p>
         </div>
@@ -279,7 +329,7 @@ export function ActivityComplianceChart({
 
       {/* Chart Area */}
       <div className="p-5">
-        {periodActivities.length === 0 || totals.expected === 0 ? (
+        {periodActivities.length + periodDeadlineColumns.length === 0 || totals.expected === 0 ? (
           <div className="h-[240px] flex flex-col items-center justify-center text-center px-4 bg-slate-50/70 border border-dashed border-slate-200 space-y-3">
             <div className="space-y-1 max-w-md">
               <p className="text-xs font-semibold text-slate-800">

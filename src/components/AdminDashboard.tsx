@@ -104,7 +104,6 @@ import { ActivityComplianceChart } from './ActivityComplianceChart';
 import { AdminSchoolReportUpload } from './AdminSchoolReportUpload';
 import { AdminUsersSection } from './AdminUsersSection';
 import { BasicaAnnualEditor } from './BasicaAnnualEditor';
-import { DistrictDeadlinesSection } from './DistrictDeadlinesSection';
 import { DistrictEnrollmentChart } from './DistrictEnrollmentChart';
 import { MediaAnnualEditor } from './MediaAnnualEditor';
 import { MonthlyComplianceWidget } from './MonthlyComplianceWidget';
@@ -1378,14 +1377,11 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
             schools={schools}
             activities={activities}
             compliances={activityCompliances}
-            onOpenCompliance={() => onSectionChange?.('activities')}
-          />
-
-          <DistrictDeadlinesSection
-            year={year}
-            adminUid={profile.uid}
             deadlines={districtDeadlines}
-            onSaved={() => setDlSavedBanner(true)}
+            parteMensualReports={parteMensualReports}
+            monthlyReports={monthlyReports}
+            annualReports={annualReports}
+            onOpenCompliance={() => onSectionChange?.('activities')}
           />
 
           <DistrictEnrollmentChart
@@ -2904,6 +2900,65 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
           profile={profile}
           activities={activities}
           compliances={activityCompliances}
+          deadlines={districtDeadlines}
+          parteMensualReports={parteMensualReports}
+          monthlyReports={monthlyReports}
+          annualReports={annualReports}
+          onDeadlinesSaved={() => setDlSavedBanner(true)}
+          onOpenReview={(target) => {
+            setReviewKind(target.kind);
+            if (target.month) {
+              setReviewMonth(target.month);
+            }
+            setReviewStatus('all');
+            setEditingInspectedReport(false);
+
+            if (target.schoolId) {
+              if (target.kind === 'parteMensual') {
+                const candidates = parteMensualReports.filter(
+                  (r) =>
+                    r.year === year &&
+                    r.schoolId === target.schoolId &&
+                    (!target.month || r.month === target.month)
+                );
+                const match =
+                  candidates.find((r) => r.status === 'submitted') ?? candidates[0] ?? null;
+                setInspectingParteMensual(match);
+                setInspectingMonthly(null);
+                setInspectingAnnual(null);
+                setReturnComment(match?.reviewComment || '');
+              } else if (target.kind === 'monthly') {
+                const candidates = monthlyReports.filter(
+                  (r) =>
+                    r.year === year &&
+                    r.schoolId === target.schoolId &&
+                    (!target.month || r.month === target.month)
+                );
+                const match =
+                  candidates.find((r) => r.status === 'submitted') ?? candidates[0] ?? null;
+                setInspectingMonthly(match);
+                setInspectingParteMensual(null);
+                setInspectingAnnual(null);
+                setReturnComment(match?.reviewComment || '');
+              } else {
+                const candidates = annualReports.filter(
+                  (r) => r.year === year && r.schoolId === target.schoolId
+                );
+                const match =
+                  candidates.find((r) => r.status === 'submitted') ?? candidates[0] ?? null;
+                setInspectingAnnual(match);
+                setInspectingParteMensual(null);
+                setInspectingMonthly(null);
+                setReturnComment(match?.reviewComment || '');
+              }
+            } else {
+              setInspectingParteMensual(null);
+              setInspectingMonthly(null);
+              setInspectingAnnual(null);
+              setReturnComment('');
+            }
+            onSectionChange?.('reviews');
+          }}
         />
       )}
 

@@ -737,6 +737,10 @@ export function DirectorDashboard({
           school={school}
           activities={activities}
           compliances={activityCompliances}
+          deadlines={districtDeadlines}
+          parteMensualReports={parteMensualReports}
+          monthlyReports={monthlyReports}
+          annualReports={annualReports}
         />
       )}
     </div>

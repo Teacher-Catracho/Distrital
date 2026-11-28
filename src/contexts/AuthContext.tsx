@@ -11,6 +11,7 @@ import {
   deleteField,
   doc,
   getDoc,
+  getDocFromServer,
   onSnapshot,
   serverTimestamp,
   setDoc,
@@ -160,6 +161,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!active) return;
 
         if (!snap.exists()) {
+          if (snap.metadata.fromCache) {
+            try {
+              const serverSnap = await getDocFromServer(userRef);
+              if (!active) return;
+              if (serverSnap.exists()) {
+                const serverData = serverSnap.data() as UserProfile;
+                setProfile(serverData);
+                setIsAdminMember(
+                  isPrimaryUser ||
+                    serverData.role === 'admin' ||
+                    serverData.adminPosition === 'asistente_tecnico'
+                );
+                setLoading(false);
+                return;
+              }
+            } catch (serverErr) {
+              if (!active) return;
+              if (isFirestoreQuotaError(serverErr)) {
+                await signOut(auth).catch(() => {});
+                setProfile(null);
+                setIsAdminMember(false);
+                setAuthError(QUOTA_ERROR_MESSAGE);
+                setLoading(false);
+                return;
+              }
+              // Fall through to normal missing-doc handling if server also confirms missing
+            }
+          }
+
           if (bootstrapAttempted) return;
           bootstrapAttempted = true;
 

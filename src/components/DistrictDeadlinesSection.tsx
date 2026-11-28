@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
+  BellOff,
   BellRing,
   CalendarClock,
   CheckCircle2,
@@ -88,6 +89,7 @@ export function DistrictDeadlinesSection({
   const [annualDeadline, setAnnualDeadline] = useState<string>(`${year}-11-30T23:59`);
   const [parteByMonth, setParteByMonth] = useState<Record<string, string>>({});
   const [movByMonth, setMovByMonth] = useState<Record<string, string>>({});
+  const [parteDisabled, setParteDisabled] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
@@ -99,24 +101,51 @@ export function DistrictDeadlinesSection({
       deadlines?.parteMensualDeadline ?? getDefaultMonthDeadlineStr(year, pMonth);
     const mDeadline =
       deadlines?.movimientosDeadline ?? getDefaultMonthDeadlineStr(year, mMonth);
+    const savedParteByMonth = deadlines?.parteMensualByMonth || {};
+    const isSavedParteDisabled = Boolean(
+      deadlines &&
+        !deadlines.parteMensualDeadline &&
+        Object.keys(savedParteByMonth).length === 0
+    );
 
     setParteMonth(pMonth);
     setParteDeadline(pDeadline);
+    setParteDisabled(isSavedParteDisabled);
     setMovMonth(mMonth);
     setMovDeadline(mDeadline);
     setAnnualDeadline(deadlines?.annualDeadline ?? `${year}-11-30T23:59`);
-    setParteByMonth({
-      ...(deadlines?.parteMensualByMonth || {}),
-      ...(pDeadline ? { [String(pMonth)]: pDeadline } : {}),
-    });
+    setParteByMonth(
+      isSavedParteDisabled
+        ? {}
+        : {
+            ...savedParteByMonth,
+            ...(pDeadline ? { [String(pMonth)]: pDeadline } : {}),
+          }
+    );
     setMovByMonth({
       ...(deadlines?.movimientosByMonth || {}),
       ...(mDeadline ? { [String(mMonth)]: mDeadline } : {}),
     });
   }, [deadlines, year, currentMonth]);
 
+  const handleToggleParteDisabled = (disabled: boolean) => {
+    setParteDisabled(disabled);
+    if (disabled) {
+      setParteDeadline('');
+      setParteByMonth({});
+    } else {
+      const def = getDefaultMonthDeadlineStr(year, parteMonth);
+      setParteDeadline(def);
+      setParteByMonth((prev) => ({
+        ...prev,
+        [String(parteMonth)]: def,
+      }));
+    }
+  };
+
   const handleParteMonthSelect = (nextMonth: number) => {
     setParteMonth(nextMonth);
+    if (parteDisabled) return;
     const scheduled = parteByMonth[String(nextMonth)];
     if (scheduled !== undefined) {
       setParteDeadline(scheduled);
@@ -126,6 +155,9 @@ export function DistrictDeadlinesSection({
   };
 
   const handleParteDeadlineChange = (val: string) => {
+    if (val && parteDisabled) {
+      setParteDisabled(false);
+    }
     setParteDeadline(val);
     setParteByMonth((prev) => ({
       ...prev,
@@ -156,14 +188,16 @@ export function DistrictDeadlinesSection({
     const nextMov: Record<string, string> = { ...movByMonth };
     for (let m = 2; m <= 11; m++) {
       const def = getDefaultMonthDeadlineStr(year, m);
-      if (!nextParte[String(m)]) nextParte[String(m)] = def;
+      if (!parteDisabled && !nextParte[String(m)]) nextParte[String(m)] = def;
       if (!nextMov[String(m)]) nextMov[String(m)] = def;
     }
-    setParteByMonth(nextParte);
-    setMovByMonth(nextMov);
-    if (!parteDeadline && nextParte[String(parteMonth)]) {
-      setParteDeadline(nextParte[String(parteMonth)]);
+    if (!parteDisabled) {
+      setParteByMonth(nextParte);
+      if (!parteDeadline && nextParte[String(parteMonth)]) {
+        setParteDeadline(nextParte[String(parteMonth)]);
+      }
     }
+    setMovByMonth(nextMov);
     if (!movDeadline && nextMov[String(movMonth)]) {
       setMovDeadline(nextMov[String(movMonth)]);
     }
@@ -176,10 +210,12 @@ export function DistrictDeadlinesSection({
     const configId = `deadlines_${year}`;
     const ref = doc(db, 'districtConfig', configId);
 
-    const nextParteMap = sanitizeByMonthMap({
-      ...parteByMonth,
-      [String(parteMonth)]: parteDeadline,
-    });
+    const nextParteMap = parteDisabled
+      ? {}
+      : sanitizeByMonthMap({
+          ...parteByMonth,
+          [String(parteMonth)]: parteDeadline,
+        });
     const nextMovMap = sanitizeByMonthMap({
       ...movByMonth,
       [String(movMonth)]: movDeadline,
@@ -187,7 +223,11 @@ export function DistrictDeadlinesSection({
 
     const payload = {
       parteMensualMonth: Number(parteMonth),
-      parteMensualDeadline: parteDeadline ? parteDeadline.slice(0, 16) : '',
+      parteMensualDeadline: parteDisabled
+        ? ''
+        : parteDeadline
+        ? parteDeadline.slice(0, 16)
+        : '',
       movimientosMonth: Number(movMonth),
       movimientosDeadline: movDeadline ? movDeadline.slice(0, 16) : '',
       annualDeadline: annualDeadline ? annualDeadline.slice(0, 16) : '',
@@ -287,6 +327,15 @@ export function DistrictDeadlinesSection({
                 Usar fin de mes
               </button>
             </div>
+            <label className="flex items-center gap-2 text-[11px] font-medium text-slate-700 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={parteDisabled}
+                onChange={(e) => handleToggleParteDisabled(e.target.checked)}
+                className="accent-blue-700 cursor-pointer"
+              />
+              <span>Desactivar alerta de Parte Mensual</span>
+            </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-2.5">
               <div>
                 <label className="block text-[11px] font-medium text-slate-600 mb-1">
@@ -294,8 +343,9 @@ export function DistrictDeadlinesSection({
                 </label>
                 <select
                   value={parteMonth}
+                  disabled={parteDisabled}
                   onChange={(e) => handleParteMonthSelect(Number(e.target.value))}
-                  className="w-full px-2.5 py-1.5 border border-slate-300 bg-white"
+                  className="w-full px-2.5 py-1.5 border border-slate-300 bg-white disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
                 >
                   {MONTHS.map((m) => (
                     <option key={m.value} value={m.value}>
@@ -311,13 +361,21 @@ export function DistrictDeadlinesSection({
                 <input
                   type="datetime-local"
                   value={parteDeadline}
+                  disabled={parteDisabled}
                   onChange={(e) => handleParteDeadlineChange(e.target.value)}
-                  className="w-full px-2.5 py-1.5 font-mono border border-slate-300 bg-white"
+                  className="w-full px-2.5 py-1.5 font-mono border border-slate-300 bg-white disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
                 />
               </div>
             </div>
             <div className="pt-1">
-              <StatusBadge deadline={parteDeadline} />
+              {parteDisabled ? (
+                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-600">
+                  <BellOff className="w-3 h-3 text-slate-500" />
+                  Alerta desactivada (no aparecerá aviso de fecha de entrega)
+                </span>
+              ) : (
+                <StatusBadge deadline={parteDeadline} />
+              )}
             </div>
           </div>
 
@@ -450,12 +508,13 @@ export function DistrictDeadlinesSection({
                           <input
                             type="datetime-local"
                             value={pVal}
+                            disabled={parteDisabled}
                             onChange={(e) => {
                               const next = e.target.value;
                               setParteByMonth((prev) => ({ ...prev, [String(m.value)]: next }));
                               if (m.value === parteMonth) setParteDeadline(next);
                             }}
-                            className="px-2.5 py-1 font-mono border border-slate-300 bg-white w-52"
+                            className="px-2.5 py-1 font-mono border border-slate-300 bg-white w-52 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
                           />
                         </td>
                         <td className="px-4 py-1.5">
@@ -475,9 +534,11 @@ export function DistrictDeadlinesSection({
                             type="button"
                             onClick={() => {
                               const def = getDefaultMonthDeadlineStr(year, m.value);
-                              setParteByMonth((prev) => ({ ...prev, [String(m.value)]: def }));
+                              if (!parteDisabled) {
+                                setParteByMonth((prev) => ({ ...prev, [String(m.value)]: def }));
+                                if (m.value === parteMonth) setParteDeadline(def);
+                              }
                               setMovByMonth((prev) => ({ ...prev, [String(m.value)]: def }));
-                              if (m.value === parteMonth) setParteDeadline(def);
                               if (m.value === movMonth) setMovDeadline(def);
                             }}
                             className="text-[11px] font-medium text-blue-700 hover:underline cursor-pointer"

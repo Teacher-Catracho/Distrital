@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   Calendar,
+  CalendarClock,
   Check,
   CheckCircle2,
   ClipboardCheck,
@@ -17,13 +18,25 @@ import {
 import type {
   ActivityAssignmentMode,
   ActivityCompliance,
+  AnnualReport,
   BasicaScope,
   DistrictActivity,
+  DistrictCode,
+  DistrictDeadlines,
   EducationLevel,
+  MonthlyReport,
   ParcialNumber,
+  ParteMensualReport,
   School,
   UserProfile,
 } from '../types/sace';
+import { DistrictDeadlinesSection } from './DistrictDeadlinesSection';
+import {
+  buildDeadlineLinkedColumns,
+  evaluateDeadlineColumnForSchool,
+  type DeadlineLinkedColumn,
+  type DeadlineSchoolEvaluation,
+} from '../utils/deadlineCompliance';
 import {
   deleteDistrictActivity,
   markSchoolActivityCompliance,
@@ -32,6 +45,7 @@ import {
 } from '../services/activityComplianceService';
 import {
   COMPLIANCE_GROUPS,
+  DISTRICT_OPTIONS,
   PARCIALES,
   buildActivityDueDateTime,
   formatDueDateTime,
@@ -53,8 +67,19 @@ interface ActivityComplianceAdminProps {
   profile: UserProfile;
   activities: DistrictActivity[];
   compliances: ActivityCompliance[];
+  deadlines?: DistrictDeadlines | null;
+  parteMensualReports?: ParteMensualReport[];
+  monthlyReports?: MonthlyReport[];
+  annualReports?: AnnualReport[];
+  onDeadlinesSaved?: () => void;
+  onOpenReview?: (target: {
+    kind: 'annual' | 'parteMensual' | 'monthly';
+    month?: number;
+    schoolId?: string;
+  }) => void;
 }
 
+type ComplianceAdminTab = 'activities' | 'deadlines';
 type MatrixFilterStatus = 'all' | 'pending' | 'completed';
 
 const ASSIGNMENT_GROUP_OPTIONS: {
@@ -74,8 +99,16 @@ export function ActivityComplianceAdmin({
   profile,
   activities,
   compliances,
+  deadlines = null,
+  parteMensualReports = [],
+  monthlyReports = [],
+  annualReports = [],
+  onDeadlinesSaved,
+  onOpenReview,
 }: ActivityComplianceAdminProps) {
+  const [activeTab, setActiveTab] = useState<ComplianceAdminTab>('activities');
   const [selectedParcial, setSelectedParcial] = useState<ParcialNumber>(getDefaultParcial());
+  const [districtFilter, setDistrictFilter] = useState<'all' | DistrictCode | 'unassigned'>('all');
   const [groupFilter, setGroupFilter] = useState<'all' | SchoolComplianceGroupKey>('all');
   const [statusFilter, setStatusFilter] = useState<MatrixFilterStatus>('all');
   const [search, setSearch] = useState('');
@@ -116,6 +149,7 @@ export function ActivityComplianceAdmin({
 
   // Activity Detail Modal State
   const [detailActivity, setDetailActivity] = useState<DistrictActivity | null>(null);
+  const [detailDeadlineCol, setDetailDeadlineCol] = useState<DeadlineLinkedColumn | null>(null);
   const [detailSearch, setDetailSearch] = useState('');
   const [detailTab, setDetailTab] = useState<'pending' | 'completed'>('pending');
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
@@ -159,6 +193,43 @@ export function ActivityComplianceAdmin({
     [yearActivities, selectedParcial]
   );
 
+  const deadlineColumns = useMemo(
+    () => buildDeadlineLinkedColumns(year, deadlines, activeSchools),
+    [year, deadlines, activeSchools]
+  );
+
+  const parcialDeadlineColumns = useMemo(
+    () => deadlineColumns.filter((c) => c.parcial === selectedParcial),
+    [deadlineColumns, selectedParcial]
+  );
+
+  const deadlineEvalMap = useMemo(() => {
+    const map = new Map<string, DeadlineSchoolEvaluation>();
+    for (const col of parcialDeadlineColumns) {
+      for (const s of activeSchools) {
+        map.set(
+          `${col.id}_${s.id}`,
+          evaluateDeadlineColumnForSchool(
+            col,
+            s,
+            parteMensualReports,
+            monthlyReports,
+            annualReports
+          )
+        );
+      }
+    }
+    return map;
+  }, [
+    parcialDeadlineColumns,
+    activeSchools,
+    parteMensualReports,
+    monthlyReports,
+    annualReports,
+  ]);
+
+  const totalColumnCount = parcialActivities.length + parcialDeadlineColumns.length;
+
   const complianceMap = useMemo(() => {
     const map = new Map<string, ActivityCompliance>();
     for (const c of compliances) {
@@ -169,14 +240,19 @@ export function ActivityComplianceAdmin({
 
   const todayIso = getTodayIsoDate();
 
-  // Compute school compliance rows
+  // Compute school compliance rows (manual activities + auto-linked SACE deadlines)
   const schoolRows = useMemo(() => {
     return activeSchools.map((school) => {
       const assigned = parcialActivities.filter((act) => act.targetSchoolIds.includes(school.id));
-      const completedCount = assigned.filter(
+      const completedActivities = assigned.filter(
         (act) => complianceMap.get(`${act.id}_${school.id}`)?.completed === true
       ).length;
-      const totalCount = assigned.length;
+      const completedDeadlines = parcialDeadlineColumns.filter(
+        (col) => deadlineEvalMap.get(`${col.id}_${school.id}`)?.completed === true
+      ).length;
+
+      const totalCount = assigned.length + parcialDeadlineColumns.length;
+      const completedCount = completedActivities + completedDeadlines;
       const pendingCount = totalCount - completedCount;
       const pct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 100;
 
@@ -188,9 +264,26 @@ export function ActivityComplianceAdmin({
         pct,
       };
     });
-  }, [activeSchools, parcialActivities, complianceMap]);
+  }, [
+    activeSchools,
+    parcialActivities,
+    parcialDeadlineColumns,
+    complianceMap,
+    deadlineEvalMap,
+  ]);
 
-  // District KPIs for selected parcial
+  const districtSchools = useMemo(() => {
+    if (districtFilter === 'all') return activeSchools;
+    if (districtFilter === 'unassigned') return activeSchools.filter((s) => !s.district);
+    return activeSchools.filter((s) => s.district === districtFilter);
+  }, [activeSchools, districtFilter]);
+
+  const districtSchoolIdSet = useMemo(
+    () => new Set(districtSchools.map((s) => s.id)),
+    [districtSchools]
+  );
+
+  // District KPIs for selected parcial (respecting district filter)
   const kpis = useMemo(() => {
     let totalExpected = 0;
     let totalCompleted = 0;
@@ -198,6 +291,7 @@ export function ActivityComplianceAdmin({
     let schoolsFull = 0;
 
     for (const row of schoolRows) {
+      if (!districtSchoolIdSet.has(row.school.id)) continue;
       if (row.assignedCount > 0) {
         schoolsWithAssigned++;
         totalExpected += row.assignedCount;
@@ -212,19 +306,20 @@ export function ActivityComplianceAdmin({
     const totalPending = totalExpected - totalCompleted;
 
     return {
-      activityCount: parcialActivities.length,
+      activityCount: totalColumnCount,
       avgPct,
       schoolsFull,
       schoolsWithAssigned,
       totalPending,
     };
-  }, [schoolRows, parcialActivities.length]);
+  }, [schoolRows, totalColumnCount, districtSchoolIdSet]);
 
   // Filtered and grouped rows for matrix display
   const groupedSections = useMemo(() => {
     const q = search.trim().toLowerCase();
 
     const matchesSearchAndStatus = (row: (typeof schoolRows)[number]) => {
+      if (!districtSchoolIdSet.has(row.school.id)) return false;
       if (statusFilter === 'pending' && row.pendingCount === 0) return false;
       if (statusFilter === 'completed' && (row.assignedCount === 0 || row.pendingCount > 0)) {
         return false;
@@ -275,7 +370,7 @@ export function ActivityComplianceAdmin({
         };
       })
       .filter((sec) => sec.rows.length > 0);
-  }, [schoolRows, groupFilter, statusFilter, search, hasBasicaC3OnlySchools]);
+  }, [schoolRows, districtSchoolIdSet, groupFilter, statusFilter, search, hasBasicaC3OnlySchools]);
 
   // Preview target school IDs for the Create/Edit modal
   const computedTargetSchoolIds = useMemo(() => {
@@ -460,6 +555,7 @@ export function ActivityComplianceAdmin({
   };
 
   const openDetailModal = (act: DistrictActivity) => {
+    setDetailDeadlineCol(null);
     setDetailActivity(act);
     setDetailSearch('');
     setDetailTab('pending');
@@ -472,6 +568,57 @@ export function ActivityComplianceAdmin({
     }
     setNoteDrafts(drafts);
   };
+
+  const openDeadlineDetailModal = (col: DeadlineLinkedColumn) => {
+    setDetailActivity(null);
+    setDetailDeadlineCol(col);
+    setDetailSearch('');
+    setDetailTab('pending');
+  };
+
+  const detailDeadlineSchools = useMemo(() => {
+    if (!detailDeadlineCol) return { pending: [], completed: [], total: 0 };
+    const q = detailSearch.trim().toLowerCase();
+    const filtered = q
+      ? activeSchools.filter(
+          (s) =>
+            s.name.toLowerCase().includes(q) ||
+            s.saceCode.toLowerCase().includes(q) ||
+            s.community.toLowerCase().includes(q) ||
+            (s.directorDisplayName || '').toLowerCase().includes(q)
+        )
+      : activeSchools;
+
+    const pending: { school: School; evalResult: DeadlineSchoolEvaluation }[] = [];
+    const completed: { school: School; evalResult: DeadlineSchoolEvaluation }[] = [];
+
+    for (const s of filtered) {
+      const evalResult =
+        deadlineEvalMap.get(`${detailDeadlineCol.id}_${s.id}`) ||
+        evaluateDeadlineColumnForSchool(
+          detailDeadlineCol,
+          s,
+          parteMensualReports,
+          monthlyReports,
+          annualReports
+        );
+      if (evalResult.completed) {
+        completed.push({ school: s, evalResult });
+      } else {
+        pending.push({ school: s, evalResult });
+      }
+    }
+
+    return { pending, completed, total: activeSchools.length };
+  }, [
+    detailDeadlineCol,
+    activeSchools,
+    detailSearch,
+    deadlineEvalMap,
+    parteMensualReports,
+    monthlyReports,
+    annualReports,
+  ]);
 
   const detailSchools = useMemo(() => {
     if (!detailActivity) return { pending: [], completed: [], total: 0 };
@@ -504,50 +651,97 @@ export function ActivityComplianceAdmin({
 
   return (
     <div className="space-y-6">
-      {/* Header + Parcial Selector + New Activity CTA */}
-      <div className="bg-white border border-slate-200 px-5 py-4 flex flex-wrap items-center justify-between gap-4">
-        <div className="space-y-0.5">
-          <h2 className="font-display text-base font-bold text-slate-900">
-            Control de Cumplimiento de Actividades y Evidencias ({year})
-          </h2>
-          <p className="text-xs text-slate-500">
-            Marca en pantalla las evidencias recibidas en el grupo de WhatsApp distrital · Haz clic en cada celda para alternar Entregado / Pendiente.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-1 p-1 bg-slate-100">
-            {PARCIALES.map((p) => {
-              const count = yearActivities.filter((a) => a.parcial === p.value).length;
-              const active = selectedParcial === p.value;
-              return (
-                <button
-                  key={p.value}
-                  type="button"
-                  onClick={() => setSelectedParcial(p.value)}
-                  className={`px-3 py-1.5 text-xs font-medium cursor-pointer whitespace-nowrap shrink-0 transition-colors ${
-                    active
-                      ? 'bg-white text-slate-900 shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  {p.label}
-                  {count > 0 ? ` (${count})` : ''}
-                </button>
-              );
-            })}
+      {/* Header + Tabs + Parcial Selector + New Activity CTA */}
+      <div className="bg-white border border-slate-200">
+        <div className="px-5 py-4 flex flex-wrap items-center justify-between gap-4">
+          <div className="space-y-0.5">
+            <h2 className="font-display text-base font-bold text-slate-900">
+              {activeTab === 'activities'
+                ? `Control de Cumplimiento de Actividades y Evidencias (${year})`
+                : `Configuración de Fechas de Entrega — Partes Mensuales y Cuadros (${year})`}
+            </h2>
+            <p className="text-xs text-slate-500">
+              {activeTab === 'activities'
+                ? 'Marca en pantalla las evidencias recibidas en el grupo de WhatsApp distrital · Haz clic en cada celda para alternar Entregado / Pendiente.'
+                : 'Define la fecha y hora máxima de entrega mensual de los Partes Mensuales, Movimientos-SACE y Cuadros Anuales para activar alertas a los directores.'}
+            </p>
           </div>
 
+          {activeTab === 'activities' && (
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-1 p-1 bg-slate-100">
+                {PARCIALES.map((p) => {
+                  const count =
+                    yearActivities.filter((a) => a.parcial === p.value).length +
+                    deadlineColumns.filter((c) => c.parcial === p.value).length;
+                  const active = selectedParcial === p.value;
+                  return (
+                    <button
+                      key={p.value}
+                      type="button"
+                      onClick={() => setSelectedParcial(p.value)}
+                      className={`px-3 py-1.5 text-xs font-medium cursor-pointer whitespace-nowrap shrink-0 transition-colors ${
+                        active
+                          ? 'bg-white text-slate-900 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      {p.label}
+                      {count > 0 ? ` (${count})` : ''}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <button
+                type="button"
+                onClick={openCreateModal}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-blue-700 hover:bg-blue-800 text-white cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Nueva Actividad
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="px-5 border-t border-slate-200 bg-slate-50/70 flex flex-wrap items-center gap-1">
           <button
             type="button"
-            onClick={openCreateModal}
-            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-blue-700 hover:bg-blue-800 text-white cursor-pointer whitespace-nowrap shrink-0"
+            onClick={() => setActiveTab('activities')}
+            className={`inline-flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-medium border-b-2 -mb-px cursor-pointer whitespace-nowrap transition-colors ${
+              activeTab === 'activities'
+                ? 'border-blue-700 text-blue-800 bg-white'
+                : 'border-transparent text-slate-600 hover:text-slate-900'
+            }`}
           >
-            <Plus className="w-3.5 h-3.5" />
-            Nueva Actividad
+            <ClipboardCheck className="w-3.5 h-3.5" />
+            Actividades y Evidencias
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('deadlines')}
+            className={`inline-flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-medium border-b-2 -mb-px cursor-pointer whitespace-nowrap transition-colors ${
+              activeTab === 'deadlines'
+                ? 'border-blue-700 text-blue-800 bg-white'
+                : 'border-transparent text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <CalendarClock className="w-3.5 h-3.5" />
+            Fechas de Entrega (Partes Mensuales)
           </button>
         </div>
       </div>
+
+      {activeTab === 'deadlines' ? (
+        <DistrictDeadlinesSection
+          year={year}
+          adminUid={profile.uid}
+          deadlines={deadlines}
+          onSaved={onDeadlinesSaved}
+        />
+      ) : (
+        <>
 
       {feedbackMsg && (
         <div className="bg-emerald-50 border border-emerald-200 px-4 py-2.5 flex items-center justify-between gap-3 text-xs text-emerald-800">
@@ -619,6 +813,28 @@ export function ActivityComplianceAdmin({
         <div className="px-5 py-3.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2">
+              <label htmlFor="matrix-district-filter" className="text-xs text-slate-600">
+                Distrito:
+              </label>
+              <select
+                id="matrix-district-filter"
+                value={districtFilter}
+                onChange={(e) =>
+                  setDistrictFilter(e.target.value as 'all' | DistrictCode | 'unassigned')
+                }
+                className="px-2.5 py-1.5 text-xs border border-slate-300 bg-white"
+              >
+                <option value="all">Todos los distritos</option>
+                {DISTRICT_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+                <option value="unassigned">Sin distrito asignado</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2">
               <label htmlFor="matrix-group-filter" className="text-xs text-slate-600">
                 Nivel:
               </label>
@@ -689,15 +905,15 @@ export function ActivityComplianceAdmin({
         </div>
 
         {/* Empty State or Matrix */}
-        {parcialActivities.length === 0 ? (
+        {totalColumnCount === 0 ? (
           <div className="p-10 text-center space-y-3">
             <ClipboardCheck className="w-8 h-8 text-slate-300 mx-auto" />
             <div className="space-y-1 max-w-md mx-auto">
               <p className="text-sm font-semibold text-slate-900">
-                Sin actividades registradas en {getParcialLabel(selectedParcial)} {year}
+                Sin actividades ni entregas programadas en {getParcialLabel(selectedParcial)} {year}
               </p>
               <p className="text-xs text-slate-500">
-                Crea la primera actividad con su fecha máxima de entrega y asígnala por nivel educativo o seleccionando centros específicos.
+                Crea una actividad o configura una fecha límite en la pestaña &ldquo;Fechas de Entrega&rdquo; para generar columnas automáticas en este tablero.
               </p>
             </div>
             <button
@@ -710,32 +926,92 @@ export function ActivityComplianceAdmin({
             </button>
           </div>
         ) : (
-          <div className="overflow-x-auto matrix-scroll">
-            <table className="w-full text-xs border-collapse">
+          <div className="overflow-x-auto matrix-scroll relative z-0">
+            <table className="w-full text-xs border-separate border-spacing-0">
               <thead>
-                <tr className="bg-[#0f2b5b] text-white border-b border-slate-300">
-                  <th className="px-2.5 py-3 text-center font-semibold w-10 border-r border-blue-900/60">
+                <tr className="bg-[#0f2b5b] text-white">
+                  <th className="px-2.5 py-3 text-center font-semibold w-10 min-w-[40px] border-r border-blue-900/60 border-b border-b-slate-300">
                     N°
                   </th>
-                  <th className="px-3 py-3 text-left font-semibold whitespace-nowrap border-r border-blue-900/60">
+                  <th className="sticky left-0 z-[2] bg-[#0f2b5b] px-3 py-3 text-left font-semibold whitespace-nowrap w-[124px] min-w-[124px] max-w-[124px] border-r border-blue-900/60 border-b border-b-slate-300">
                     Código SACE
                   </th>
-                  <th className="px-3 py-3 text-left font-semibold min-w-[210px] border-r border-blue-900/60">
+                  <th className="sticky left-[124px] z-[2] bg-[#0f2b5b] px-3 py-3 text-left font-semibold min-w-[210px] border-r border-blue-900/60 border-b border-b-slate-300 shadow-[2px_0_5px_-2px_rgba(15,23,42,0.35)]">
                     Centro Educativo
                   </th>
-                  <th className="px-3 py-3 text-left font-semibold min-w-[130px] border-r border-blue-900/60">
+                  <th className="px-3 py-3 text-left font-semibold min-w-[130px] border-r border-blue-900/60 border-b border-b-slate-300">
                     Comunidad
                   </th>
-                  <th className="px-2.5 py-3 text-left font-semibold whitespace-nowrap border-r border-blue-900/60">
+                  <th className="px-2.5 py-3 text-left font-semibold whitespace-nowrap border-r border-blue-900/60 border-b border-b-slate-300">
                     Sector
                   </th>
+
+                  {parcialDeadlineColumns.map((col) => {
+                    const pastDue =
+                      getActivityDeadlineInfo(col.dueDate, false, todayIso, col.dueTime).state ===
+                      'overdue';
+                    const doneForCol = districtSchools.filter(
+                      (s) => deadlineEvalMap.get(`${col.id}_${s.id}`)?.completed === true
+                    ).length;
+
+                    return (
+                      <th
+                        key={col.id}
+                        className="px-2 py-2.5 text-center font-medium min-w-[136px] max-w-[170px] border-r border-blue-900/60 border-b border-b-slate-300 align-top bg-[#133671]"
+                      >
+                        <div className="space-y-1.5">
+                          <span className="block text-[9px] uppercase tracking-wider text-amber-200 font-semibold text-left">
+                            Cuadro SACE · Auto
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => openDeadlineDetailModal(col)}
+                            title={`${col.title} — ${col.description}`}
+                            className="text-left w-full hover:underline cursor-pointer"
+                          >
+                            <span className="block font-semibold text-white leading-tight line-clamp-2 text-[11px]">
+                              {col.title}
+                            </span>
+                          </button>
+                          <div className="flex items-center justify-between gap-1 text-[10px] text-blue-100 font-mono">
+                            <span className={pastDue ? 'text-amber-300' : 'text-blue-200'}>
+                              {formatDueDateTime(col.dueDate, col.dueTime)}
+                            </span>
+                            <span>
+                              {doneForCol}/{districtSchools.length}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-end gap-1 pt-0.5">
+                            <button
+                              type="button"
+                              onClick={() => openDeadlineDetailModal(col)}
+                              title="Ver centros aprobados y pendientes"
+                              className="p-1 text-blue-200 hover:text-white hover:bg-blue-800/60 cursor-pointer"
+                            >
+                              <Eye className="w-3 h-3" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setActiveTab('deadlines')}
+                              title="Configurar fecha de entrega"
+                              className="p-1 text-blue-200 hover:text-white hover:bg-blue-800/60 cursor-pointer"
+                            >
+                              <CalendarClock className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                      </th>
+                    );
+                  })}
 
                   {parcialActivities.map((act) => {
                     const pastDue =
                       getActivityDeadlineInfo(act.dueDate, false, todayIso, act.dueTime).state ===
                       'overdue';
-                    const assignedCount = act.targetSchoolIds.length;
-                    const doneForAct = activeSchools.filter(
+                    const assignedCount = act.targetSchoolIds.filter((id) =>
+                      districtSchoolIdSet.has(id)
+                    ).length;
+                    const doneForAct = districtSchools.filter(
                       (s) =>
                         act.targetSchoolIds.includes(s.id) &&
                         complianceMap.get(`${act.id}_${s.id}`)?.completed
@@ -744,7 +1020,7 @@ export function ActivityComplianceAdmin({
                     return (
                       <th
                         key={act.id}
-                        className="px-2 py-2.5 text-center font-medium min-w-[128px] max-w-[160px] border-r border-blue-900/60 align-top"
+                        className="px-2 py-2.5 text-center font-medium min-w-[128px] max-w-[160px] border-r border-blue-900/60 border-b border-b-slate-300 align-top"
                       >
                         <div className="space-y-1.5">
                           <button
@@ -788,13 +1064,13 @@ export function ActivityComplianceAdmin({
                     );
                   })}
 
-                  <th className="px-3 py-3 text-center font-semibold whitespace-nowrap border-r border-blue-900/60">
+                  <th className="px-3 py-3 text-center font-semibold whitespace-nowrap border-r border-blue-900/60 border-b border-b-slate-300">
                     Completo
                   </th>
-                  <th className="px-3 py-3 text-center font-semibold min-w-[125px] border-r border-blue-900/60">
+                  <th className="px-3 py-3 text-center font-semibold min-w-[125px] border-r border-blue-900/60 border-b border-b-slate-300">
                     Pendiente / Avance
                   </th>
-                  <th className="px-3 py-3 text-right font-semibold whitespace-nowrap">
+                  <th className="px-3 py-3 text-right font-semibold whitespace-nowrap border-b border-b-slate-300">
                     % Cumplimiento
                   </th>
                 </tr>
@@ -804,8 +1080,8 @@ export function ActivityComplianceAdmin({
                 {groupedSections.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={8 + parcialActivities.length}
-                      className="px-4 py-8 text-center text-slate-500"
+                      colSpan={8 + totalColumnCount}
+                      className="px-4 py-8 text-center text-slate-500 border-b border-slate-200"
                     >
                       No hay centros educativos que coincidan con el filtro aplicado.
                     </td>
@@ -813,39 +1089,124 @@ export function ActivityComplianceAdmin({
                 ) : (
                   groupedSections.map((group) => (
                     <React.Fragment key={group.key}>
-                      <tr className="bg-slate-200/85 border-y border-slate-300">
+                      <tr className="bg-slate-200/85">
                         <td
-                          colSpan={8 + parcialActivities.length}
-                          className="px-3 py-1.5 text-[11px] font-bold tracking-wide text-slate-800 uppercase"
+                          colSpan={8 + totalColumnCount}
+                          className="px-3 py-1.5 text-[11px] font-bold tracking-wide text-slate-800 uppercase border-y border-slate-300"
                         >
-                          {group.label} · {group.rows.length}{' '}
-                          {group.rows.length === 1 ? 'centro' : 'centros'}
+                          <span className="sticky left-3 inline-block">
+                            {group.label} · {group.rows.length}{' '}
+                            {group.rows.length === 1 ? 'centro' : 'centros'}
+                          </span>
                         </td>
                       </tr>
 
                       {group.rows.map(({ school, assignedCount, completedCount, pct }, idx) => (
                         <tr
                           key={`${group.key}_${school.id}`}
-                          className="border-b border-slate-200 hover:bg-slate-50/90"
+                          className="group hover:bg-slate-50/90"
                         >
-                          <td className="px-2.5 py-2 text-center font-mono text-slate-500 tabular-nums border-r border-slate-200">
+                          <td className="px-2.5 py-2 text-center font-mono text-slate-500 tabular-nums border-r border-b border-slate-200">
                             {idx + 1}
                           </td>
-                          <td className="px-3 py-2 font-mono text-slate-700 whitespace-nowrap border-r border-slate-200">
+                          <td className="sticky left-0 z-[1] bg-white group-hover:bg-slate-50 px-3 py-2 font-mono text-slate-700 whitespace-nowrap w-[124px] min-w-[124px] max-w-[124px] border-r border-b border-slate-200">
                             {school.saceCode}
                           </td>
-                          <td className="px-3 py-2 border-r border-slate-200">
+                          <td className="sticky left-[124px] z-[1] bg-white group-hover:bg-slate-50 px-3 py-2 min-w-[210px] border-r border-b border-slate-200 shadow-[2px_0_5px_-2px_rgba(15,23,42,0.1)]">
                             <p className="font-medium text-slate-900 leading-snug">{school.name}</p>
                             <p className="text-[11px] text-slate-500 truncate max-w-[220px]">
                               {school.directorDisplayName || 'Sin director vinculado'}
                             </p>
                           </td>
-                          <td className="px-3 py-2 text-slate-600 border-r border-slate-200">
+                          <td className="px-3 py-2 text-slate-600 border-r border-b border-slate-200">
                             {school.community}
                           </td>
-                          <td className="px-2.5 py-2 text-[11px] text-slate-600 whitespace-nowrap border-r border-slate-200">
+                          <td className="px-2.5 py-2 text-[11px] text-slate-600 whitespace-nowrap border-r border-b border-slate-200">
                             {school.sector === 'no_gubernamental' ? 'No Gubernamental' : 'Gubernamental'}
                           </td>
+
+                          {parcialDeadlineColumns.map((col) => {
+                            const ev = deadlineEvalMap.get(`${col.id}_${school.id}`);
+                            const isCompleted = ev?.completed === true;
+                            const hasSubmitted = !isCompleted && (ev?.submittedCount ?? 0) > 0;
+                            const hasReturned =
+                              !isCompleted && !hasSubmitted && (ev?.returnedCount ?? 0) > 0;
+                            const isPastDue = !isCompleted && col.dueDate < todayIso;
+                            const levelSummary = ev
+                              ? ev.levels
+                                  .map(
+                                    (l) =>
+                                      `${l.levelLabel}: ${
+                                        l.status === 'approved'
+                                          ? 'Aprobado'
+                                          : l.status === 'submitted'
+                                          ? 'Enviado'
+                                          : l.status === 'returned'
+                                          ? 'Devuelto'
+                                          : l.status === 'draft'
+                                          ? 'Borrador'
+                                          : 'Sin subir'
+                                      }`
+                                  )
+                                  .join(' · ')
+                              : '';
+
+                            return (
+                              <td
+                                key={col.id}
+                                className="px-1.5 py-1.5 text-center border-r border-b border-slate-200"
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() => openDeadlineDetailModal(col)}
+                                  title={`${col.title} · ${levelSummary} · Se marca Cumplido automáticamente al aprobar en Revisión de Reportes`}
+                                  className={`w-full inline-flex items-center justify-center gap-1 px-2 py-1 text-[11px] font-medium border transition-colors cursor-pointer whitespace-nowrap ${
+                                    isCompleted
+                                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800 hover:bg-emerald-100'
+                                      : hasSubmitted
+                                      ? 'bg-blue-50 border-blue-200 text-blue-800 hover:bg-blue-100'
+                                      : hasReturned
+                                      ? 'bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100'
+                                      : isPastDue
+                                      ? 'bg-red-50/70 border-red-200 text-red-700 hover:bg-red-100'
+                                      : 'bg-white border-slate-200 text-slate-600 hover:border-blue-400 hover:text-blue-800'
+                                  }`}
+                                >
+                                  {isCompleted ? (
+                                    <>
+                                      <Check className="w-3 h-3 shrink-0" />
+                                      <span>Cumplido</span>
+                                    </>
+                                  ) : hasSubmitted ? (
+                                    <>
+                                      <Clock className="w-3 h-3 shrink-0" />
+                                      <span>
+                                        Por aprobar
+                                        {ev && ev.totalLevels > 1 && ev.approvedCount > 0
+                                          ? ` (${ev.approvedCount}/${ev.totalLevels})`
+                                          : ''}
+                                      </span>
+                                    </>
+                                  ) : hasReturned ? (
+                                    <>
+                                      <AlertCircle className="w-3 h-3 shrink-0" />
+                                      <span>Devuelto</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <X className="w-3 h-3 shrink-0" />
+                                      <span>
+                                        Pendiente
+                                        {ev && ev.totalLevels > 1 && ev.approvedCount > 0
+                                          ? ` (${ev.approvedCount}/${ev.totalLevels})`
+                                          : ''}
+                                      </span>
+                                    </>
+                                  )}
+                                </button>
+                              </td>
+                            );
+                          })}
 
                           {parcialActivities.map((act) => {
                             const isAssigned = act.targetSchoolIds.includes(school.id);
@@ -853,7 +1214,7 @@ export function ActivityComplianceAdmin({
                               return (
                                 <td
                                   key={act.id}
-                                  className="px-2 py-2 text-center text-slate-300 border-r border-slate-200 bg-slate-50/40"
+                                  className="px-2 py-2 text-center text-slate-300 border-r border-b border-slate-200 bg-slate-50/40"
                                   title="Esta actividad no fue asignada a este centro"
                                 >
                                   —
@@ -870,7 +1231,7 @@ export function ActivityComplianceAdmin({
                             return (
                               <td
                                 key={act.id}
-                                className="px-1.5 py-1.5 text-center border-r border-slate-200"
+                                className="px-1.5 py-1.5 text-center border-r border-b border-slate-200"
                               >
                                 <button
                                   type="button"
@@ -908,10 +1269,10 @@ export function ActivityComplianceAdmin({
                             );
                           })}
 
-                          <td className="px-3 py-2 text-center font-mono tabular-nums whitespace-nowrap border-r border-slate-200 text-slate-900 font-semibold">
+                          <td className="px-3 py-2 text-center font-mono tabular-nums whitespace-nowrap border-r border-b border-slate-200 text-slate-900 font-semibold">
                             {assignedCount > 0 ? `${completedCount}/${assignedCount}` : '0/0'}
                           </td>
-                          <td className="px-3 py-2 border-r border-slate-200">
+                          <td className="px-3 py-2 border-r border-b border-slate-200">
                             {assignedCount > 0 ? (
                               <div
                                 className="w-full h-3 bg-red-600/85 overflow-hidden flex"
@@ -926,7 +1287,7 @@ export function ActivityComplianceAdmin({
                               <span className="text-[11px] text-slate-400">Sin asignar</span>
                             )}
                           </td>
-                          <td className="px-3 py-2 text-right font-mono font-bold tabular-nums whitespace-nowrap">
+                          <td className="px-3 py-2 text-right font-mono font-bold tabular-nums whitespace-nowrap border-b border-slate-200">
                             {assignedCount > 0 ? (
                               <span
                                 className={
@@ -1451,6 +1812,177 @@ export function ActivityComplianceAdmin({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Deadline-Linked SACE Column Detail Modal */}
+      {detailDeadlineCol && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 w-full max-w-3xl max-h-[90vh] flex flex-col">
+            <div className="px-5 py-4 border-b border-slate-200 flex items-start justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                  <span>{getParcialLabel(detailDeadlineCol.parcial)}</span>
+                  <span aria-hidden="true">·</span>
+                  <span className="inline-flex items-center gap-1 font-mono">
+                    <Calendar className="w-3 h-3" />
+                    Fecha límite: {formatDueDateTime(detailDeadlineCol.dueDate, detailDeadlineCol.dueTime)}
+                  </span>
+                  <span aria-hidden="true">·</span>
+                  <span className="font-mono tabular-nums">
+                    {detailDeadlineSchools.completed.length}/{detailDeadlineSchools.total} cumplidos
+                  </span>
+                </div>
+                <h3 className="font-display text-base font-bold text-slate-900">
+                  {detailDeadlineCol.title}
+                </h3>
+                <p className="text-xs text-slate-600">
+                  {detailDeadlineCol.description} Se marca automáticamente como{' '}
+                  <strong>Cumplido</strong> cuando todos los niveles habilitados del centro son
+                  aprobados en Revisión de Reportes.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDetailDeadlineCol(null)}
+                className="p-1 text-slate-500 hover:text-slate-900 cursor-pointer shrink-0"
+                aria-label="Cerrar detalle"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="px-5 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 bg-slate-50">
+              <div className="flex items-center gap-1 p-1 bg-slate-200/70">
+                <button
+                  type="button"
+                  onClick={() => setDetailTab('pending')}
+                  className={`px-3 py-1 text-xs font-medium cursor-pointer whitespace-nowrap ${
+                    detailTab === 'pending'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Pendientes ({detailDeadlineSchools.pending.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDetailTab('completed')}
+                  className={`px-3 py-1 text-xs font-medium cursor-pointer whitespace-nowrap ${
+                    detailTab === 'completed'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Cumplidos ({detailDeadlineSchools.completed.length})
+                </button>
+              </div>
+
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
+                <input
+                  type="text"
+                  value={detailSearch}
+                  onChange={(e) => setDetailSearch(e.target.value)}
+                  placeholder="Filtrar centro..."
+                  className="pl-8 pr-3 py-1.5 text-xs border border-slate-300 bg-white w-56"
+                />
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto divide-y divide-slate-200">
+              {(detailTab === 'pending'
+                ? detailDeadlineSchools.pending
+                : detailDeadlineSchools.completed
+              ).length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-500">
+                  {detailTab === 'pending'
+                    ? 'Todos los centros ya tienen aprobado este cuadro.'
+                    : 'Aún no hay centros con aprobación completa para este cuadro.'}
+                </div>
+              ) : (
+                (detailTab === 'pending'
+                  ? detailDeadlineSchools.pending
+                  : detailDeadlineSchools.completed
+                ).map(({ school, evalResult }) => (
+                  <div
+                    key={school.id}
+                    className="px-5 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50"
+                  >
+                    <div className="space-y-1 min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-mono text-xs text-slate-500">{school.saceCode}</span>
+                        <span className="text-xs font-semibold text-slate-900">{school.name}</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500">
+                        {school.community} ·{' '}
+                        {school.directorDisplayName || 'Sin director asignado'}
+                      </p>
+                      <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                        {evalResult.levels.map((lvl) => (
+                          <span
+                            key={lvl.level}
+                            className={`px-2 py-0.5 text-[10px] font-medium border ${
+                              lvl.status === 'approved'
+                                ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                                : lvl.status === 'submitted'
+                                ? 'bg-blue-50 border-blue-200 text-blue-800'
+                                : lvl.status === 'returned'
+                                ? 'bg-amber-50 border-amber-200 text-amber-800'
+                                : 'bg-slate-50 border-slate-200 text-slate-600'
+                            }`}
+                          >
+                            {lvl.levelLabel}:{' '}
+                            {lvl.status === 'approved'
+                              ? 'Aprobado'
+                              : lvl.status === 'submitted'
+                              ? 'Enviado (por revisar)'
+                              : lvl.status === 'returned'
+                              ? 'Devuelto'
+                              : lvl.status === 'draft'
+                              ? 'Borrador'
+                              : 'Sin subir'}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    {onOpenReview && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const targetKind = detailDeadlineCol.kind;
+                          const targetMonth = detailDeadlineCol.month;
+                          setDetailDeadlineCol(null);
+                          onOpenReview({
+                            kind: targetKind,
+                            month: targetMonth,
+                            schoolId: school.id,
+                          });
+                        }}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border cursor-pointer whitespace-nowrap shrink-0 ${
+                          evalResult.completed
+                            ? 'bg-emerald-50 border-emerald-200 text-emerald-800 hover:bg-emerald-100'
+                            : evalResult.submittedCount > 0
+                            ? 'bg-blue-700 border-blue-700 text-white hover:bg-blue-800'
+                            : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
+                        }`}
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        {evalResult.completed
+                          ? 'Ver en Revisión'
+                          : evalResult.submittedCount > 0
+                          ? 'Revisar y aprobar'
+                          : 'Ir a Revisión'}
+                      </button>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+        </>
       )}
     </div>
   );

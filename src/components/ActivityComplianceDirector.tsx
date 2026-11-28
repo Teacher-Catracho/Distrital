@@ -9,10 +9,18 @@ import {
 } from 'lucide-react';
 import type {
   ActivityCompliance,
+  AnnualReport,
   DistrictActivity,
+  DistrictDeadlines,
+  MonthlyReport,
   ParcialNumber,
+  ParteMensualReport,
   School,
 } from '../types/sace';
+import {
+  buildDeadlineLinkedColumns,
+  evaluateDeadlineColumnForSchool,
+} from '../utils/deadlineCompliance';
 import {
   PARCIALES,
   buildActivityDueDateTime,
@@ -29,6 +37,10 @@ interface ActivityComplianceDirectorProps {
   school: School;
   activities: DistrictActivity[];
   compliances: ActivityCompliance[];
+  deadlines?: DistrictDeadlines | null;
+  parteMensualReports?: ParteMensualReport[];
+  monthlyReports?: MonthlyReport[];
+  annualReports?: AnnualReport[];
 }
 
 type DirectorFilterMode = 'pending' | 'all' | 'completed';
@@ -38,6 +50,10 @@ export function ActivityComplianceDirector({
   school,
   activities,
   compliances,
+  deadlines = null,
+  parteMensualReports = [],
+  monthlyReports = [],
+  annualReports = [],
 }: ActivityComplianceDirectorProps) {
   const [selectedParcial, setSelectedParcial] = useState<ParcialNumber>(getDefaultParcial());
   const [filterMode, setFilterMode] = useState<DirectorFilterMode>('pending');
@@ -62,15 +78,84 @@ export function ActivityComplianceDirector({
     [activities, year, school.id]
   );
 
+  const deadlineColumns = useMemo(
+    () => buildDeadlineLinkedColumns(year, deadlines, [school]),
+    [year, deadlines, school]
+  );
+
   const parcialActivities = useMemo(() => {
-    const items = yearActivities
+    const manualItems = yearActivities
       .filter((a) => a.parcial === selectedParcial)
       .map((act) => {
         const comp = complianceByActivity.get(act.id);
         const completed = comp?.completed === true;
         const deadline = getActivityDeadlineInfo(act.dueDate, completed, todayIso, act.dueTime);
-        return { act, comp, completed, deadline };
+        return {
+          id: act.id,
+          title: act.title,
+          description: act.description,
+          dueDate: act.dueDate,
+          dueTime: act.dueTime,
+          note: comp?.note || '',
+          completedDate: comp?.completedDate || '',
+          completed,
+          deadline,
+          isAutoReport: false,
+          submittedWaitingApproval: false,
+          levelSummary: '',
+        };
       });
+
+    const deadlineItems = deadlineColumns
+      .filter((col) => col.parcial === selectedParcial)
+      .map((col) => {
+        const evalRes = evaluateDeadlineColumnForSchool(
+          col,
+          school,
+          parteMensualReports,
+          monthlyReports,
+          annualReports
+        );
+        const deadline = getActivityDeadlineInfo(
+          col.dueDate,
+          evalRes.completed,
+          todayIso,
+          col.dueTime
+        );
+        const levelSummary = evalRes.levels
+          .map(
+            (l) =>
+              `${l.levelLabel}: ${
+                l.status === 'approved'
+                  ? 'Aprobado'
+                  : l.status === 'submitted'
+                  ? 'Enviado (en revisión)'
+                  : l.status === 'returned'
+                  ? 'Devuelto'
+                  : l.status === 'draft'
+                  ? 'Borrador'
+                  : 'Sin subir'
+              }`
+          )
+          .join(' · ');
+
+        return {
+          id: col.id,
+          title: col.title,
+          description: col.description,
+          dueDate: col.dueDate,
+          dueTime: col.dueTime,
+          note: '',
+          completedDate: evalRes.completedDate,
+          completed: evalRes.completed,
+          deadline,
+          isAutoReport: true,
+          submittedWaitingApproval: !evalRes.completed && evalRes.submittedCount > 0,
+          levelSummary,
+        };
+      });
+
+    const items = [...deadlineItems, ...manualItems];
 
     const priorityRank = {
       overdue: 0,
@@ -82,11 +167,21 @@ export function ActivityComplianceDirector({
     return items.sort((a, b) => {
       const rankDiff = priorityRank[a.deadline.state] - priorityRank[b.deadline.state];
       if (rankDiff !== 0) return rankDiff;
-      return buildActivityDueDateTime(a.act.dueDate, a.act.dueTime).localeCompare(
-        buildActivityDueDateTime(b.act.dueDate, b.act.dueTime)
+      return buildActivityDueDateTime(a.dueDate, a.dueTime).localeCompare(
+        buildActivityDueDateTime(b.dueDate, b.dueTime)
       );
     });
-  }, [yearActivities, selectedParcial, complianceByActivity, todayIso]);
+  }, [
+    yearActivities,
+    deadlineColumns,
+    selectedParcial,
+    complianceByActivity,
+    todayIso,
+    school,
+    parteMensualReports,
+    monthlyReports,
+    annualReports,
+  ]);
 
   const stats = useMemo(() => {
     const total = parcialActivities.length;
@@ -119,9 +214,22 @@ export function ActivityComplianceDirector({
         <div className="flex items-center gap-1 p-1 bg-slate-100">
           {PARCIALES.map((p) => {
             const parcialList = yearActivities.filter((a) => a.parcial === p.value);
-            const pendingCount = parcialList.filter(
+            const manualPending = parcialList.filter(
               (a) => !complianceByActivity.get(a.id)?.completed
             ).length;
+            const deadlinePending = deadlineColumns
+              .filter((c) => c.parcial === p.value)
+              .filter(
+                (c) =>
+                  !evaluateDeadlineColumnForSchool(
+                    c,
+                    school,
+                    parteMensualReports,
+                    monthlyReports,
+                    annualReports
+                  ).completed
+              ).length;
+            const pendingCount = manualPending + deadlinePending;
             const active = selectedParcial === p.value;
 
             return (
@@ -284,58 +392,79 @@ export function ActivityComplianceDirector({
                   </td>
                 </tr>
               ) : (
-                visibleItems.map(({ act, comp, completed, deadline }) => (
-                  <tr key={act.id} className="hover:bg-slate-50">
+                visibleItems.map((item) => (
+                  <tr key={item.id} className="hover:bg-slate-50">
                     <td className="px-5 py-3.5 max-w-lg">
-                      <p className="font-semibold text-slate-900 text-sm">{act.title}</p>
-                      {act.description && (
-                        <p className="text-xs text-slate-600 mt-1">{act.description}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-semibold text-slate-900 text-sm">{item.title}</p>
+                        {item.isAutoReport && (
+                          <span className="px-1.5 py-0.5 text-[10px] font-medium bg-blue-50 border border-blue-200 text-blue-800">
+                            Cuadro SACE
+                          </span>
+                        )}
+                      </div>
+                      {item.description && (
+                        <p className="text-xs text-slate-600 mt-1">{item.description}</p>
                       )}
-                      {comp?.note && (
+                      {item.levelSummary && (
+                        <p className="text-[11px] text-slate-600 mt-1">{item.levelSummary}</p>
+                      )}
+                      {item.note && (
                         <p className="text-[11px] text-slate-700 mt-1.5">
-                          <span className="font-semibold">Observación Distrital:</span> {comp.note}
+                          <span className="font-semibold">Observación Distrital:</span> {item.note}
                         </p>
                       )}
                     </td>
                     <td className="px-4 py-3.5 whitespace-nowrap">
                       <span className="inline-flex items-center gap-1.5 font-mono text-slate-800">
                         <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                        {formatDueDateTime(act.dueDate, act.dueTime)}
+                        {formatDueDateTime(item.dueDate, item.dueTime)}
                       </span>
                     </td>
                     <td className="px-4 py-3.5 whitespace-nowrap">
-                      {completed ? (
+                      {item.completed ? (
                         <span className="text-emerald-800 font-medium">
-                          {comp?.completedDate
-                            ? `Validada el ${formatShortDueDate(comp.completedDate)}`
+                          {item.completedDate
+                            ? `Validada el ${formatShortDueDate(item.completedDate)}`
+                            : item.isAutoReport
+                            ? 'Aprobado por Dirección'
                             : 'Validada por Dirección'}
+                        </span>
+                      ) : item.submittedWaitingApproval ? (
+                        <span className="text-blue-700 font-medium">
+                          Enviado · En espera de aprobación
                         </span>
                       ) : (
                         <span
                           className={
-                            deadline.state === 'overdue'
+                            item.deadline.state === 'overdue'
                               ? 'text-red-700 font-semibold'
-                              : deadline.state === 'due_soon'
+                              : item.deadline.state === 'due_soon'
                               ? 'text-amber-700 font-semibold'
                               : 'text-slate-600'
                           }
                         >
-                          {deadline.label}
+                          {item.deadline.label}
                         </span>
                       )}
                     </td>
                     <td className="px-4 py-3.5 whitespace-nowrap">
-                      {completed ? (
+                      {item.completed ? (
                         <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-700">
                           <CheckCircle2 className="w-4 h-4 shrink-0" />
                           Cumplido
                         </span>
-                      ) : deadline.state === 'overdue' ? (
+                      ) : item.submittedWaitingApproval ? (
+                        <span className="inline-flex items-center gap-1.5 font-medium text-blue-700">
+                          <Clock className="w-4 h-4 shrink-0" />
+                          En revisión
+                        </span>
+                      ) : item.deadline.state === 'overdue' ? (
                         <span className="inline-flex items-center gap-1.5 font-medium text-red-700">
                           <AlertTriangle className="w-4 h-4 shrink-0" />
                           Vencida
                         </span>
-                      ) : deadline.state === 'due_soon' ? (
+                      ) : item.deadline.state === 'due_soon' ? (
                         <span className="inline-flex items-center gap-1.5 font-medium text-amber-700">
                           <Clock className="w-4 h-4 shrink-0" />
                           Por vencer
