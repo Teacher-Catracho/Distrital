@@ -90,6 +90,7 @@ interface AdminSchoolReportUploadProps {
   parteMensualReports: ParteMensualReport[];
   monthlyReports: MonthlyReport[];
   annualReports: AnnualReport[];
+  reportsLoaded?: boolean;
   onGoToSchools?: () => void;
 }
 
@@ -100,6 +101,7 @@ export function AdminSchoolReportUpload({
   parteMensualReports,
   monthlyReports,
   annualReports,
+  reportsLoaded = true,
   onGoToSchools,
 }: AdminSchoolReportUploadProps) {
   const [kind, setKind] = useState<UploadReportKind>('parteMensual');
@@ -202,6 +204,44 @@ export function AdminSchoolReportUpload({
     }
     return map;
   }, [selectedSchool, annualReports, year]);
+
+  const currentParteMensualReport = useMemo(() => {
+    if (!selectedSchool) return null;
+    return (
+      parteMensualReports.find(
+        (r) =>
+          r.year === year &&
+          r.month === selectedMonth &&
+          r.schoolId === selectedSchool.id &&
+          r.level === selectedLevel
+      ) ?? null
+    );
+  }, [parteMensualReports, year, selectedMonth, selectedSchool, selectedLevel]);
+
+  const currentMonthlyReport = useMemo(() => {
+    if (!selectedSchool) return null;
+    return (
+      monthlyReports.find(
+        (r) =>
+          r.year === year &&
+          r.month === selectedMonth &&
+          r.schoolId === selectedSchool.id &&
+          r.level === selectedLevel
+      ) ?? null
+    );
+  }, [monthlyReports, year, selectedMonth, selectedSchool, selectedLevel]);
+
+  const currentAnnualReport = useMemo(() => {
+    if (!selectedSchool) return null;
+    return (
+      annualReports.find(
+        (r) =>
+          r.year === year &&
+          r.schoolId === selectedSchool.id &&
+          r.level === selectedLevel
+      ) ?? null
+    );
+  }, [annualReports, year, selectedSchool, selectedLevel]);
 
   if (sortedSchools.length === 0) {
     return (
@@ -519,6 +559,9 @@ export function AdminSchoolReportUpload({
               }
               school={selectedSchool}
               profile={profile}
+              prefetchedReport={currentParteMensualReport}
+              prefetchedLoaded={reportsLoaded}
+              prefetchedParteMensualReports={parteMensualReports}
             />
           )}
 
@@ -530,6 +573,8 @@ export function AdminSchoolReportUpload({
               level={selectedLevel}
               school={selectedSchool}
               profile={profile}
+              prefetchedReport={currentMonthlyReport}
+              prefetchedLoaded={reportsLoaded}
             />
           )}
 
@@ -539,6 +584,9 @@ export function AdminSchoolReportUpload({
               year={year}
               school={selectedSchool}
               profile={profile}
+              prefetchedReport={currentAnnualReport}
+              prefetchedLoaded={reportsLoaded}
+              prefetchedParteMensualReports={parteMensualReports}
             />
           )}
 
@@ -549,6 +597,9 @@ export function AdminSchoolReportUpload({
               basicaScope={getBasicaScope(selectedSchool)}
               school={selectedSchool}
               profile={profile}
+              prefetchedReport={currentAnnualReport}
+              prefetchedLoaded={reportsLoaded}
+              prefetchedParteMensualReports={parteMensualReports}
             />
           )}
 
@@ -558,6 +609,9 @@ export function AdminSchoolReportUpload({
               year={year}
               school={selectedSchool}
               profile={profile}
+              prefetchedReport={currentAnnualReport}
+              prefetchedLoaded={reportsLoaded}
+              prefetchedParteMensualReports={parteMensualReports}
             />
           )}
         </>

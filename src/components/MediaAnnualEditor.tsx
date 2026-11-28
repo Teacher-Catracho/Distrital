@@ -20,6 +20,7 @@ import type {
   MediaGradeKey,
   ModalityType,
   NVCount,
+  ParteMensualReport,
   ReportStatus,
   School,
   SectorType,
@@ -45,7 +46,10 @@ import {
   totalNV,
   type ParteMensualAnnualSummary,
 } from '../utils/saceCalculations';
-import { fetchAnnualSummaryFromParteMensual } from '../services/parteMensualSyncService';
+import {
+  computeAnnualSummaryFromLoadedPartes,
+  fetchAnnualSummaryFromParteMensual,
+} from '../services/parteMensualSyncService';
 import { exportMediaExcel } from '../utils/exportExcel';
 import { exportMediaPdf } from '../utils/exportPdf';
 import { NumericCell } from './NumericCell';
@@ -62,6 +66,9 @@ interface MediaAnnualEditorProps {
   reviewMode?: boolean;
   externalData?: MediaAnnualData;
   isConsolidated?: boolean;
+  prefetchedReport?: AnnualReport | null;
+  prefetchedLoaded?: boolean;
+  prefetchedParteMensualReports?: ParteMensualReport[];
   onAfterSave?: () => void;
 }
 
@@ -73,6 +80,9 @@ export function MediaAnnualEditor({
   reviewMode = false,
   externalData,
   isConsolidated = false,
+  prefetchedReport,
+  prefetchedLoaded = false,
+  prefetchedParteMensualReports,
   onAfterSave,
 }: MediaAnnualEditorProps) {
   const reportId = `${year}_${school.id}_media`;
@@ -92,6 +102,13 @@ export function MediaAnnualEditor({
   const [syncingPm, setSyncingPm] = useState(false);
   const [pmSummary, setPmSummary] = useState<ParteMensualAnnualSummary | null>(null);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [existingMeta, setExistingMeta] = useState<{
+    exists: boolean;
+    directorUid?: string;
+    directorName?: string;
+    reviewedByUid?: string;
+    reviewComment?: string;
+  }>({ exists: false });
 
   const applyPmSummaryToMedia = (
     baseData: MediaAnnualData,
@@ -118,52 +135,99 @@ export function MediaAnnualEditor({
       setLoading(false);
       return;
     }
+
+    const gradeKeys = MEDIA_GRADES.map((g) => g.key);
+    const applyLoaded = (
+      reportDoc: AnnualReport | null,
+      summary: ParteMensualAnnualSummary
+    ) => {
+      let loadedStatus: ReportStatus = 'draft';
+      let baseData = createEmptyMediaData();
+      const defaultDni =
+        school.directorUid && school.directorUid === profile.uid ? profile.dni || '' : '';
+      if (reportDoc) {
+        baseData = (reportDoc.data as MediaAnnualData) || createEmptyMediaData();
+        loadedStatus = reportDoc.status || 'draft';
+        setSector(reportDoc.sector || school.sector || 'gubernamental');
+        setModality(reportDoc.modality || school.modality || 'presencial');
+        setDirectorName(
+          reportDoc.directorName || school.directorDisplayName || profile.displayName
+        );
+        setDirectorDni(reportDoc.directorDni || defaultDni);
+        setPlaceAndDate(reportDoc.placeAndDate || `Omoa, Cortés, ${year}`);
+        setStatus(loadedStatus);
+        setReviewComment(reportDoc.reviewComment || '');
+        setExistingMeta({
+          exists: true,
+          directorUid: reportDoc.directorUid,
+          directorName: reportDoc.directorName,
+          reviewedByUid: reportDoc.reviewedByUid,
+          reviewComment: reportDoc.reviewComment,
+        });
+      } else {
+        setSector(school.sector || 'gubernamental');
+        setModality(school.modality || 'presencial');
+        setDirectorName(school.directorDisplayName || profile.displayName);
+        setDirectorDni(defaultDni);
+        setPlaceAndDate(`Omoa, Cortés, ${year}`);
+        setStatus('draft');
+        setReviewComment('');
+        setExistingMeta({ exists: false });
+      }
+
+      const shouldAutoApplyPm =
+        !reviewMode &&
+        !readOnly &&
+        loadedStatus !== 'approved' &&
+        loadedStatus !== 'submitted' &&
+        summary.monthsFound.length > 0;
+
+      setPmSummary(summary);
+      setData(shouldAutoApplyPm ? applyPmSummaryToMedia(baseData, summary) : baseData);
+    };
+
+    const hasPrefetchedReport =
+      prefetchedReport !== undefined && (prefetchedReport !== null || prefetchedLoaded);
+    const hasPrefetchedPartes = prefetchedParteMensualReports !== undefined;
+
+    if (hasPrefetchedReport && hasPrefetchedPartes) {
+      const summary = computeAnnualSummaryFromLoadedPartes(
+        prefetchedParteMensualReports,
+        year,
+        school.id,
+        'media',
+        gradeKeys
+      );
+      applyLoaded(prefetchedReport ?? null, summary);
+      setLoading(false);
+      return;
+    }
+
     let active = true;
     async function load() {
       setLoading(true);
       setFeedback(null);
       try {
-        const gradeKeys = MEDIA_GRADES.map((g) => g.key);
-        const [snap, summary] = await Promise.all([
-          getDoc(doc(db, 'annualReports', reportId)),
-          fetchAnnualSummaryFromParteMensual(year, school.id, 'media', gradeKeys),
+        const [reportDoc, summary] = await Promise.all([
+          hasPrefetchedReport
+            ? Promise.resolve(prefetchedReport ?? null)
+            : getDoc(doc(db, 'annualReports', reportId)).then((snap) =>
+                snap.exists() ? (snap.data() as AnnualReport) : null
+              ),
+          hasPrefetchedPartes
+            ? Promise.resolve(
+                computeAnnualSummaryFromLoadedPartes(
+                  prefetchedParteMensualReports,
+                  year,
+                  school.id,
+                  'media',
+                  gradeKeys
+                )
+              )
+            : fetchAnnualSummaryFromParteMensual(year, school.id, 'media', gradeKeys),
         ]);
         if (!active) return;
-
-        let loadedStatus: ReportStatus = 'draft';
-        let baseData = createEmptyMediaData();
-        const defaultDni =
-          school.directorUid && school.directorUid === profile.uid ? profile.dni || '' : '';
-        if (snap.exists()) {
-          const r = snap.data() as AnnualReport;
-          baseData = (r.data as MediaAnnualData) || createEmptyMediaData();
-          loadedStatus = r.status || 'draft';
-          setSector(r.sector || school.sector || 'gubernamental');
-          setModality(r.modality || school.modality || 'presencial');
-          setDirectorName(r.directorName || school.directorDisplayName || profile.displayName);
-          setDirectorDni(r.directorDni || defaultDni);
-          setPlaceAndDate(r.placeAndDate || `Omoa, Cortés, ${year}`);
-          setStatus(loadedStatus);
-          setReviewComment(r.reviewComment || '');
-        } else {
-          setSector(school.sector || 'gubernamental');
-          setModality(school.modality || 'presencial');
-          setDirectorName(school.directorDisplayName || profile.displayName);
-          setDirectorDni(defaultDni);
-          setPlaceAndDate(`Omoa, Cortés, ${year}`);
-          setStatus('draft');
-          setReviewComment('');
-        }
-
-        const shouldAutoApplyPm =
-          !reviewMode &&
-          !readOnly &&
-          loadedStatus !== 'approved' &&
-          loadedStatus !== 'submitted' &&
-          summary.monthsFound.length > 0;
-
-        setPmSummary(summary);
-        setData(shouldAutoApplyPm ? applyPmSummaryToMedia(baseData, summary) : baseData);
+        applyLoaded(reportDoc, summary);
       } catch (err) {
         handleFirestoreError(err, OperationType.GET, `annualReports/${reportId}`);
       } finally {
@@ -180,6 +244,7 @@ export function MediaAnnualEditor({
     school.id,
     externalData,
     reviewMode,
+    readOnly,
     school.sector,
     school.modality,
     school.directorUid,
@@ -187,6 +252,9 @@ export function MediaAnnualEditor({
     profile.displayName,
     profile.dni,
     profile.uid,
+    prefetchedReport,
+    prefetchedLoaded,
+    prefetchedParteMensualReports,
   ]);
 
   const isAdminActor =
@@ -201,12 +269,17 @@ export function MediaAnnualEditor({
     setSyncingPm(true);
     setFeedback(null);
     try {
-      const summary = await fetchAnnualSummaryFromParteMensual(
-        year,
-        school.id,
-        'media',
-        MEDIA_GRADES.map((g) => g.key)
-      );
+      const gradeKeys = MEDIA_GRADES.map((g) => g.key);
+      const summary =
+        isAdminActor && prefetchedParteMensualReports !== undefined && prefetchedLoaded
+          ? computeAnnualSummaryFromLoadedPartes(
+              prefetchedParteMensualReports,
+              year,
+              school.id,
+              'media',
+              gradeKeys
+            )
+          : await fetchAnnualSummaryFromParteMensual(year, school.id, 'media', gradeKeys);
       setPmSummary(summary);
       if (summary.monthsFound.length === 0) {
         setFeedback({
@@ -253,19 +326,29 @@ export function MediaAnnualEditor({
     const path = `annualReports/${reportId}`;
     try {
       const ref = doc(db, 'annualReports', reportId);
-      const existing = await getDoc(ref);
       const validSchoolDirectorUid =
         school.directorUid && /^[a-zA-Z0-9_-]{1,128}$/.test(school.directorUid)
           ? school.directorUid
           : '';
 
-      if (existing.exists()) {
-        const existingData = existing.data() as AnnualReport;
+      if (existingMeta.exists) {
         const cleanDirectorName =
           directorName.trim() ||
           school.directorDisplayName ||
-          existingData.directorName ||
+          existingMeta.directorName ||
           profile.displayName;
+        const nextDirectorUid = validSchoolDirectorUid || existingMeta.directorUid || profile.uid;
+        const nextReviewedByUid =
+          targetStatus === 'approved'
+            ? profile.uid
+            : targetStatus === 'returned'
+            ? existingMeta.reviewedByUid || profile.uid
+            : '';
+        const nextReviewComment =
+          targetStatus === 'approved' || targetStatus === 'submitted'
+            ? ''
+            : existingMeta.reviewComment || '';
+
         await updateDoc(ref, {
           schoolName: school.name,
           saceCode: school.saceCode,
@@ -279,24 +362,25 @@ export function MediaAnnualEditor({
           status: targetStatus,
           ...(isAdminActor
             ? {
-                directorUid: validSchoolDirectorUid || existingData.directorUid || profile.uid,
-                reviewedByUid:
-                  targetStatus === 'approved'
-                    ? profile.uid
-                    : targetStatus === 'returned'
-                    ? existingData.reviewedByUid || profile.uid
-                    : '',
-                reviewComment:
-                  targetStatus === 'approved' || targetStatus === 'submitted'
-                    ? ''
-                    : existingData.reviewComment || '',
+                directorUid: nextDirectorUid,
+                reviewedByUid: nextReviewedByUid,
+                reviewComment: nextReviewComment,
               }
             : {}),
           updatedAt: serverTimestamp(),
         });
+        setExistingMeta({
+          exists: true,
+          directorName: cleanDirectorName,
+          directorUid: isAdminActor ? nextDirectorUid : existingMeta.directorUid,
+          reviewedByUid: isAdminActor ? nextReviewedByUid : existingMeta.reviewedByUid,
+          reviewComment: isAdminActor ? nextReviewComment : existingMeta.reviewComment,
+        });
       } else {
         const cleanDirectorName =
           directorName.trim() || school.directorDisplayName || profile.displayName;
+        const nextDirectorUid = validSchoolDirectorUid || profile.uid;
+        const nextReviewedByUid = isAdminActor && targetStatus === 'approved' ? profile.uid : '';
         await setDoc(ref, {
           year,
           schoolId: school.id,
@@ -306,16 +390,23 @@ export function MediaAnnualEditor({
           sector,
           modality,
           level: 'media',
-          directorUid: validSchoolDirectorUid || profile.uid,
+          directorUid: nextDirectorUid,
           directorName: cleanDirectorName,
           directorDni: directorDni.trim(),
           placeAndDate: placeAndDate.trim(),
           data,
           status: targetStatus,
           reviewComment: '',
-          reviewedByUid: isAdminActor && targetStatus === 'approved' ? profile.uid : '',
+          reviewedByUid: nextReviewedByUid,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
+        });
+        setExistingMeta({
+          exists: true,
+          directorName: cleanDirectorName,
+          directorUid: nextDirectorUid,
+          reviewedByUid: nextReviewedByUid,
+          reviewComment: '',
         });
       }
       setStatus(targetStatus);

@@ -172,6 +172,7 @@ export interface MarkComplianceInput {
   completed: boolean;
   completedDate?: string;
   note?: string;
+  existingCompliance?: ActivityCompliance | null;
 }
 
 /**
@@ -187,16 +188,19 @@ export async function markSchoolActivityCompliance(
   const compRef = doc(db, 'activityCompliances', docId);
   const directorUid = resolveSchoolDirectorUid(school, users);
 
-  let existingSnap;
-  try {
-    existingSnap = await getDoc(compRef);
-  } catch (err) {
-    handleFirestoreError(err, OperationType.GET, path);
+  let existingData: Omit<ActivityCompliance, 'id'> | null = null;
+  if (input.existingCompliance !== undefined) {
+    existingData = input.existingCompliance;
+  } else {
+    try {
+      const existingSnap = await getDoc(compRef);
+      existingData = existingSnap.exists()
+        ? (existingSnap.data() as Omit<ActivityCompliance, 'id'>)
+        : null;
+    } catch (err) {
+      handleFirestoreError(err, OperationType.GET, path);
+    }
   }
-
-  const existingData = existingSnap.exists()
-    ? (existingSnap.data() as Omit<ActivityCompliance, 'id'>)
-    : null;
 
   const finalCompletedDate = completed
     ? input.completedDate || existingData?.completedDate || getTodayIsoDate()

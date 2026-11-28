@@ -6,6 +6,7 @@ import type {
   AnnualReport,
   EstadisticoRow,
   NVCount,
+  ParteMensualReport,
   PrebasicaAgeKey,
   PrebasicaAnnualData,
   PrebasicaGradeKey,
@@ -25,7 +26,10 @@ import {
   totalNV,
   type ParteMensualAnnualSummary,
 } from '../utils/saceCalculations';
-import { fetchAnnualSummaryFromParteMensual } from '../services/parteMensualSyncService';
+import {
+  computeAnnualSummaryFromLoadedPartes,
+  fetchAnnualSummaryFromParteMensual,
+} from '../services/parteMensualSyncService';
 import { exportPrebasicaExcel } from '../utils/exportExcel';
 import { exportPrebasicaPdf } from '../utils/exportPdf';
 import { NumericCell } from './NumericCell';
@@ -42,6 +46,9 @@ interface PrebasicaAnnualEditorProps {
   reviewMode?: boolean;
   externalData?: PrebasicaAnnualData;
   isConsolidated?: boolean;
+  prefetchedReport?: AnnualReport | null;
+  prefetchedLoaded?: boolean;
+  prefetchedParteMensualReports?: ParteMensualReport[];
   onAfterSave?: () => void;
 }
 
@@ -53,6 +60,9 @@ export function PrebasicaAnnualEditor({
   reviewMode = false,
   externalData,
   isConsolidated = false,
+  prefetchedReport,
+  prefetchedLoaded = false,
+  prefetchedParteMensualReports,
   onAfterSave,
 }: PrebasicaAnnualEditorProps) {
   const reportId = `${year}_${school.id}_prebasica`;
@@ -74,6 +84,12 @@ export function PrebasicaAnnualEditor({
   const [syncingPm, setSyncingPm] = useState(false);
   const [pmSummary, setPmSummary] = useState<ParteMensualAnnualSummary | null>(null);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [existingMeta, setExistingMeta] = useState<{
+    exists: boolean;
+    directorUid?: string;
+    reviewedByUid?: string;
+    reviewComment?: string;
+  }>({ exists: false });
 
   const applyPmSummaryToPrebasica = (
     baseData: PrebasicaAnnualData,
@@ -97,48 +113,94 @@ export function PrebasicaAnnualEditor({
       setLoading(false);
       return;
     }
+
+    const gradeKeys = PREBASICA_GRADES.map((g) => g.key);
+    const applyLoaded = (
+      reportDoc: AnnualReport | null,
+      summary: ParteMensualAnnualSummary
+    ) => {
+      let loadedStatus: ReportStatus = 'draft';
+      let baseData = createEmptyPrebasicaData();
+      const defaultDni =
+        school.directorUid && school.directorUid === profile.uid ? profile.dni || '' : '';
+      if (reportDoc) {
+        baseData = normalizePrebasicaData(reportDoc.data as Partial<PrebasicaAnnualData>);
+        loadedStatus = reportDoc.status || 'draft';
+        setDirectorName(
+          reportDoc.directorName || school.directorDisplayName || profile.displayName
+        );
+        setDirectorDni(reportDoc.directorDni || defaultDni);
+        setPlaceAndDate(reportDoc.placeAndDate || `Omoa, Cortés, ${year}`);
+        setStatus(loadedStatus);
+        setReviewComment(reportDoc.reviewComment || '');
+        setExistingMeta({
+          exists: true,
+          directorUid: reportDoc.directorUid,
+          reviewedByUid: reportDoc.reviewedByUid,
+          reviewComment: reportDoc.reviewComment,
+        });
+      } else {
+        setDirectorName(school.directorDisplayName || profile.displayName);
+        setDirectorDni(defaultDni);
+        setPlaceAndDate(`Omoa, Cortés, ${year}`);
+        setStatus('draft');
+        setReviewComment('');
+        setExistingMeta({ exists: false });
+      }
+
+      const shouldAutoApplyPm =
+        !reviewMode &&
+        !readOnly &&
+        loadedStatus !== 'approved' &&
+        loadedStatus !== 'submitted' &&
+        summary.monthsFound.length > 0;
+
+      setPmSummary(summary);
+      setData(shouldAutoApplyPm ? applyPmSummaryToPrebasica(baseData, summary) : baseData);
+    };
+
+    const hasPrefetchedReport =
+      prefetchedReport !== undefined && (prefetchedReport !== null || prefetchedLoaded);
+    const hasPrefetchedPartes = prefetchedParteMensualReports !== undefined;
+
+    if (hasPrefetchedReport && hasPrefetchedPartes) {
+      const summary = computeAnnualSummaryFromLoadedPartes(
+        prefetchedParteMensualReports,
+        year,
+        school.id,
+        'prebasica',
+        gradeKeys
+      );
+      applyLoaded(prefetchedReport ?? null, summary);
+      setLoading(false);
+      return;
+    }
+
     let active = true;
     async function load() {
       setLoading(true);
       setFeedback(null);
       try {
-        const gradeKeys = PREBASICA_GRADES.map((g) => g.key);
-        const [snap, summary] = await Promise.all([
-          getDoc(doc(db, 'annualReports', reportId)),
-          fetchAnnualSummaryFromParteMensual(year, school.id, 'prebasica', gradeKeys),
+        const [reportDoc, summary] = await Promise.all([
+          hasPrefetchedReport
+            ? Promise.resolve(prefetchedReport ?? null)
+            : getDoc(doc(db, 'annualReports', reportId)).then((snap) =>
+                snap.exists() ? (snap.data() as AnnualReport) : null
+              ),
+          hasPrefetchedPartes
+            ? Promise.resolve(
+                computeAnnualSummaryFromLoadedPartes(
+                  prefetchedParteMensualReports,
+                  year,
+                  school.id,
+                  'prebasica',
+                  gradeKeys
+                )
+              )
+            : fetchAnnualSummaryFromParteMensual(year, school.id, 'prebasica', gradeKeys),
         ]);
         if (!active) return;
-
-        let loadedStatus: ReportStatus = 'draft';
-        let baseData = createEmptyPrebasicaData();
-        const defaultDni =
-          school.directorUid && school.directorUid === profile.uid ? profile.dni || '' : '';
-        if (snap.exists()) {
-          const r = snap.data() as AnnualReport;
-          baseData = normalizePrebasicaData(r.data as Partial<PrebasicaAnnualData>);
-          loadedStatus = r.status || 'draft';
-          setDirectorName(r.directorName || school.directorDisplayName || profile.displayName);
-          setDirectorDni(r.directorDni || defaultDni);
-          setPlaceAndDate(r.placeAndDate || `Omoa, Cortés, ${year}`);
-          setStatus(loadedStatus);
-          setReviewComment(r.reviewComment || '');
-        } else {
-          setDirectorName(school.directorDisplayName || profile.displayName);
-          setDirectorDni(defaultDni);
-          setPlaceAndDate(`Omoa, Cortés, ${year}`);
-          setStatus('draft');
-          setReviewComment('');
-        }
-
-        const shouldAutoApplyPm =
-          !reviewMode &&
-          !readOnly &&
-          loadedStatus !== 'approved' &&
-          loadedStatus !== 'submitted' &&
-          summary.monthsFound.length > 0;
-
-        setPmSummary(summary);
-        setData(shouldAutoApplyPm ? applyPmSummaryToPrebasica(baseData, summary) : baseData);
+        applyLoaded(reportDoc, summary);
       } catch (err) {
         handleFirestoreError(err, OperationType.GET, `annualReports/${reportId}`);
       } finally {
@@ -155,11 +217,15 @@ export function PrebasicaAnnualEditor({
     school.id,
     externalData,
     reviewMode,
+    readOnly,
     school.directorUid,
     school.directorDisplayName,
     profile.displayName,
     profile.dni,
     profile.uid,
+    prefetchedReport,
+    prefetchedLoaded,
+    prefetchedParteMensualReports,
   ]);
 
   const isAdminActor =
@@ -174,12 +240,17 @@ export function PrebasicaAnnualEditor({
     setSyncingPm(true);
     setFeedback(null);
     try {
-      const summary = await fetchAnnualSummaryFromParteMensual(
-        year,
-        school.id,
-        'prebasica',
-        PREBASICA_GRADES.map((g) => g.key)
-      );
+      const gradeKeys = PREBASICA_GRADES.map((g) => g.key);
+      const summary =
+        isAdminActor && prefetchedParteMensualReports !== undefined && prefetchedLoaded
+          ? computeAnnualSummaryFromLoadedPartes(
+              prefetchedParteMensualReports,
+              year,
+              school.id,
+              'prebasica',
+              gradeKeys
+            )
+          : await fetchAnnualSummaryFromParteMensual(year, school.id, 'prebasica', gradeKeys);
       setPmSummary(summary);
       if (summary.monthsFound.length === 0) {
         setFeedback({
@@ -246,7 +317,6 @@ export function PrebasicaAnnualEditor({
     const path = `annualReports/${reportId}`;
     try {
       const ref = doc(db, 'annualReports', reportId);
-      const existing = await getDoc(ref);
       const validSchoolDirectorUid =
         school.directorUid && /^[a-zA-Z0-9_-]{1,128}$/.test(school.directorUid)
           ? school.directorUid
@@ -256,8 +326,19 @@ export function PrebasicaAnnualEditor({
       const cleanDirectorDni = directorDni.trim();
       const normalizedPayload = normalizePrebasicaData(data);
 
-      if (existing.exists()) {
-        const existingData = existing.data() as AnnualReport;
+      if (existingMeta.exists) {
+        const nextDirectorUid = validSchoolDirectorUid || existingMeta.directorUid || profile.uid;
+        const nextReviewedByUid =
+          targetStatus === 'approved'
+            ? profile.uid
+            : targetStatus === 'returned'
+            ? existingMeta.reviewedByUid || profile.uid
+            : '';
+        const nextReviewComment =
+          targetStatus === 'approved' || targetStatus === 'submitted'
+            ? ''
+            : existingMeta.reviewComment || '';
+
         await updateDoc(ref, {
           schoolName: school.name,
           saceCode: school.saceCode,
@@ -271,22 +352,22 @@ export function PrebasicaAnnualEditor({
           status: targetStatus,
           ...(isAdminActor
             ? {
-                directorUid: validSchoolDirectorUid || existingData.directorUid || profile.uid,
-                reviewedByUid:
-                  targetStatus === 'approved'
-                    ? profile.uid
-                    : targetStatus === 'returned'
-                    ? existingData.reviewedByUid || profile.uid
-                    : '',
-                reviewComment:
-                  targetStatus === 'approved' || targetStatus === 'submitted'
-                    ? ''
-                    : existingData.reviewComment || '',
+                directorUid: nextDirectorUid,
+                reviewedByUid: nextReviewedByUid,
+                reviewComment: nextReviewComment,
               }
             : {}),
           updatedAt: serverTimestamp(),
         });
+        setExistingMeta({
+          exists: true,
+          directorUid: isAdminActor ? nextDirectorUid : existingMeta.directorUid,
+          reviewedByUid: isAdminActor ? nextReviewedByUid : existingMeta.reviewedByUid,
+          reviewComment: isAdminActor ? nextReviewComment : existingMeta.reviewComment,
+        });
       } else {
+        const nextDirectorUid = validSchoolDirectorUid || profile.uid;
+        const nextReviewedByUid = isAdminActor && targetStatus === 'approved' ? profile.uid : '';
         await setDoc(ref, {
           year,
           schoolId: school.id,
@@ -296,16 +377,22 @@ export function PrebasicaAnnualEditor({
           sector: school.sector,
           modality: school.modality,
           level: 'prebasica',
-          directorUid: validSchoolDirectorUid || profile.uid,
+          directorUid: nextDirectorUid,
           directorName: cleanDirectorName,
           directorDni: cleanDirectorDni,
           placeAndDate: placeAndDate.trim(),
           data: normalizedPayload,
           status: targetStatus,
           reviewComment: '',
-          reviewedByUid: isAdminActor && targetStatus === 'approved' ? profile.uid : '',
+          reviewedByUid: nextReviewedByUid,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
+        });
+        setExistingMeta({
+          exists: true,
+          directorUid: nextDirectorUid,
+          reviewedByUid: nextReviewedByUid,
+          reviewComment: '',
         });
       }
       setStatus(targetStatus);

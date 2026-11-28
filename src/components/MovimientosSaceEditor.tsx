@@ -32,6 +32,8 @@ interface MovimientosSaceEditorProps {
   profile: UserProfile;
   readOnly?: boolean;
   reviewMode?: boolean;
+  prefetchedReport?: MonthlyReport | null;
+  prefetchedLoaded?: boolean;
   onAfterSave?: () => void;
 }
 
@@ -55,6 +57,8 @@ export function MovimientosSaceEditor({
   profile,
   readOnly = false,
   reviewMode = false,
+  prefetchedReport,
+  prefetchedLoaded = false,
   onAfterSave,
 }: MovimientosSaceEditorProps) {
   const monthLabel = MONTHS.find((m) => m.value === month)?.label || String(month);
@@ -72,33 +76,58 @@ export function MovimientosSaceEditor({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [existingMeta, setExistingMeta] = useState<{
+    exists: boolean;
+    directorUid?: string;
+    directorName?: string;
+    reviewedByUid?: string;
+    reviewComment?: string;
+  }>({ exists: false });
 
   useEffect(() => {
+    const applyLoadedReport = (d: MonthlyReport | null) => {
+      if (d) {
+        setIngresos(d.ingresos || []);
+        setTraslados(d.traslados || []);
+        setDesertores(d.desertores || []);
+        setNoMovements(Boolean(d.noMovements));
+        setStatus(d.status || 'draft');
+        setReviewComment(d.reviewComment || '');
+        setExistingMeta({
+          exists: true,
+          directorUid: d.directorUid,
+          directorName: d.directorName,
+          reviewedByUid: d.reviewedByUid,
+          reviewComment: d.reviewComment,
+        });
+      } else {
+        setIngresos([]);
+        setTraslados([]);
+        setDesertores([]);
+        setNoMovements(false);
+        setStatus('draft');
+        setReviewComment('');
+        setExistingMeta({ exists: false });
+      }
+    };
+
+    setFeedback(null);
+    setConfirmClearForZero(false);
+
+    if (prefetchedReport !== undefined && (prefetchedReport !== null || prefetchedLoaded)) {
+      applyLoadedReport(prefetchedReport);
+      setLoading(false);
+      return;
+    }
+
     let active = true;
     async function load() {
       setLoading(true);
-      setFeedback(null);
-      setConfirmClearForZero(false);
       const path = `monthlyReports/${reportId}`;
       try {
         const snap = await getDoc(doc(db, 'monthlyReports', reportId));
         if (!active) return;
-        if (snap.exists()) {
-          const d = snap.data() as MonthlyReport;
-          setIngresos(d.ingresos || []);
-          setTraslados(d.traslados || []);
-          setDesertores(d.desertores || []);
-          setNoMovements(Boolean(d.noMovements));
-          setStatus(d.status || 'draft');
-          setReviewComment(d.reviewComment || '');
-        } else {
-          setIngresos([]);
-          setTraslados([]);
-          setDesertores([]);
-          setNoMovements(false);
-          setStatus('draft');
-          setReviewComment('');
-        }
+        applyLoadedReport(snap.exists() ? (snap.data() as MonthlyReport) : null);
       } catch (err) {
         handleFirestoreError(err, OperationType.GET, path);
       } finally {
@@ -109,7 +138,7 @@ export function MovimientosSaceEditor({
     return () => {
       active = false;
     };
-  }, [reportId]);
+  }, [reportId, prefetchedReport, prefetchedLoaded]);
 
   const isAdminActor =
     profile.role === 'admin' || profile.adminPosition === 'asistente_tecnico';
@@ -227,16 +256,26 @@ export function MovimientosSaceEditor({
     const path = `monthlyReports/${reportId}`;
     try {
       const ref = doc(db, 'monthlyReports', reportId);
-      const existing = await getDoc(ref);
       const validSchoolDirectorUid =
         school.directorUid && /^[a-zA-Z0-9_-]{1,128}$/.test(school.directorUid)
           ? school.directorUid
           : '';
 
-      if (existing.exists()) {
-        const existingData = existing.data() as MonthlyReport;
+      if (existingMeta.exists) {
         const resolvedDirectorName =
-          school.directorDisplayName || existingData.directorName || profile.displayName;
+          school.directorDisplayName || existingMeta.directorName || profile.displayName;
+        const nextDirectorUid = validSchoolDirectorUid || existingMeta.directorUid || profile.uid;
+        const nextReviewedByUid =
+          targetStatus === 'approved'
+            ? profile.uid
+            : targetStatus === 'returned'
+            ? existingMeta.reviewedByUid || profile.uid
+            : '';
+        const nextReviewComment =
+          targetStatus === 'approved' || targetStatus === 'submitted'
+            ? ''
+            : existingMeta.reviewComment || '';
+
         await updateDoc(ref, {
           schoolName: school.name,
           saceCode: school.saceCode,
@@ -248,23 +287,24 @@ export function MovimientosSaceEditor({
           status: targetStatus,
           ...(isAdminActor
             ? {
-                directorUid: validSchoolDirectorUid || existingData.directorUid || profile.uid,
-                reviewedByUid:
-                  targetStatus === 'approved'
-                    ? profile.uid
-                    : targetStatus === 'returned'
-                    ? existingData.reviewedByUid || profile.uid
-                    : '',
-                reviewComment:
-                  targetStatus === 'approved' || targetStatus === 'submitted'
-                    ? ''
-                    : existingData.reviewComment || '',
+                directorUid: nextDirectorUid,
+                reviewedByUid: nextReviewedByUid,
+                reviewComment: nextReviewComment,
               }
             : {}),
           updatedAt: serverTimestamp(),
         });
+        setExistingMeta({
+          exists: true,
+          directorName: resolvedDirectorName,
+          directorUid: isAdminActor ? nextDirectorUid : existingMeta.directorUid,
+          reviewedByUid: isAdminActor ? nextReviewedByUid : existingMeta.reviewedByUid,
+          reviewComment: isAdminActor ? nextReviewComment : existingMeta.reviewComment,
+        });
       } else {
         const resolvedDirectorName = school.directorDisplayName || profile.displayName;
+        const nextDirectorUid = validSchoolDirectorUid || profile.uid;
+        const nextReviewedByUid = isAdminActor && targetStatus === 'approved' ? profile.uid : '';
         await setDoc(ref, {
           year,
           month,
@@ -272,7 +312,7 @@ export function MovimientosSaceEditor({
           schoolName: school.name,
           saceCode: school.saceCode,
           level,
-          directorUid: validSchoolDirectorUid || profile.uid,
+          directorUid: nextDirectorUid,
           directorName: resolvedDirectorName,
           ingresos: finalIngresos,
           traslados: finalTraslados,
@@ -280,9 +320,16 @@ export function MovimientosSaceEditor({
           noMovements: effectiveNoMovements,
           status: targetStatus,
           reviewComment: '',
-          reviewedByUid: isAdminActor && targetStatus === 'approved' ? profile.uid : '',
+          reviewedByUid: nextReviewedByUid,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
+        });
+        setExistingMeta({
+          exists: true,
+          directorName: resolvedDirectorName,
+          directorUid: nextDirectorUid,
+          reviewedByUid: nextReviewedByUid,
+          reviewComment: '',
         });
       }
       if (effectiveNoMovements) {

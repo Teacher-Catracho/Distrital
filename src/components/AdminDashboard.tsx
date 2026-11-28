@@ -21,10 +21,13 @@ import {
   deleteField,
   doc,
   getDoc,
+  getDocs,
   onSnapshot,
+  query,
   serverTimestamp,
   setDoc,
   updateDoc,
+  where,
   writeBatch,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
@@ -148,6 +151,17 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
   const [activityCompliances, setActivityCompliances] = useState<ActivityCompliance[]>([]);
   const [schoolContacts, setSchoolContacts] = useState<Record<string, SchoolContact>>({});
   const [districtDeadlines, setDistrictDeadlines] = useState<DistrictDeadlines | null>(null);
+  const [yearReportsLoaded, setYearReportsLoaded] = useState({
+    parte: false,
+    monthly: false,
+    annual: false,
+  });
+  const [usersSubscribed, setUsersSubscribed] = useState(
+    activeSection === 'users' || activeSection === 'activities'
+  );
+  const [schoolContactsSubscribed, setSchoolContactsSubscribed] = useState(
+    activeSection === 'schools'
+  );
 
   // Deadlines config modal state
   const [showDeadlinesModal, setShowDeadlinesModal] = useState(false);
@@ -227,8 +241,21 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
   const [consSchoolId, setConsSchoolId] = useState<string>('all');
 
   useEffect(() => {
-    const u1 = onSnapshot(
+    if ((activeSection === 'users' || activeSection === 'activities') && !usersSubscribed) {
+      setUsersSubscribed(true);
+    }
+    if (activeSection === 'schools' && !schoolContactsSubscribed) {
+      setSchoolContactsSubscribed(true);
+    }
+  }, [activeSection, usersSubscribed, schoolContactsSubscribed]);
+
+  useEffect(() => {
+    const reqQuery = query(
       collection(db, 'directorRequests'),
+      where('status', '==', 'pending')
+    );
+    const u1 = onSnapshot(
+      reqQuery,
       (snap) => {
         setRequests(
           snap.docs.map((d) => d.data() as DirectorRequest)
@@ -237,6 +264,11 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
       (err) => handleFirestoreError(err, OperationType.LIST, 'directorRequests')
     );
 
+    return () => u1();
+  }, []);
+
+  useEffect(() => {
+    if (!usersSubscribed) return;
     const u2 = onSnapshot(
       collection(db, 'users'),
       (snap) => {
@@ -245,56 +277,11 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
       (err) => handleFirestoreError(err, OperationType.LIST, 'users')
     );
 
-    const u3 = onSnapshot(
-      collection(db, 'monthlyReports'),
-      (snap) => {
-        setMonthlyReports(
-          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<MonthlyReport, 'id'>) }))
-        );
-      },
-      (err) => handleFirestoreError(err, OperationType.LIST, 'monthlyReports')
-    );
+    return () => u2();
+  }, [usersSubscribed]);
 
-    const u4 = onSnapshot(
-      collection(db, 'annualReports'),
-      (snap) => {
-        setAnnualReports(
-          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AnnualReport, 'id'>) }))
-        );
-      },
-      (err) => handleFirestoreError(err, OperationType.LIST, 'annualReports')
-    );
-
-    const u5 = onSnapshot(
-      collection(db, 'parteMensualReports'),
-      (snap) => {
-        setParteMensualReports(
-          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ParteMensualReport, 'id'>) }))
-        );
-      },
-      (err) => handleFirestoreError(err, OperationType.LIST, 'parteMensualReports')
-    );
-
-    const u6 = onSnapshot(
-      collection(db, 'activities'),
-      (snap) => {
-        setActivities(
-          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<DistrictActivity, 'id'>) }))
-        );
-      },
-      (err) => handleFirestoreError(err, OperationType.LIST, 'activities')
-    );
-
-    const u7 = onSnapshot(
-      collection(db, 'activityCompliances'),
-      (snap) => {
-        setActivityCompliances(
-          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ActivityCompliance, 'id'>) }))
-        );
-      },
-      (err) => handleFirestoreError(err, OperationType.LIST, 'activityCompliances')
-    );
-
+  useEffect(() => {
+    if (!schoolContactsSubscribed) return;
     const u8 = onSnapshot(
       collection(db, 'schoolContacts'),
       (snap) => {
@@ -307,17 +294,73 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
       (err) => handleFirestoreError(err, OperationType.LIST, 'schoolContacts')
     );
 
+    return () => u8();
+  }, [schoolContactsSubscribed]);
+
+  useEffect(() => {
+    setYearReportsLoaded({ parte: false, monthly: false, annual: false });
+
+    const u3 = onSnapshot(
+      query(collection(db, 'monthlyReports'), where('year', '==', year)),
+      (snap) => {
+        setMonthlyReports(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<MonthlyReport, 'id'>) }))
+        );
+        setYearReportsLoaded((prev) => (prev.monthly ? prev : { ...prev, monthly: true }));
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'monthlyReports')
+    );
+
+    const u4 = onSnapshot(
+      query(collection(db, 'annualReports'), where('year', '==', year)),
+      (snap) => {
+        setAnnualReports(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AnnualReport, 'id'>) }))
+        );
+        setYearReportsLoaded((prev) => (prev.annual ? prev : { ...prev, annual: true }));
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'annualReports')
+    );
+
+    const u5 = onSnapshot(
+      query(collection(db, 'parteMensualReports'), where('year', '==', year)),
+      (snap) => {
+        setParteMensualReports(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ParteMensualReport, 'id'>) }))
+        );
+        setYearReportsLoaded((prev) => (prev.parte ? prev : { ...prev, parte: true }));
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'parteMensualReports')
+    );
+
+    const u6 = onSnapshot(
+      query(collection(db, 'activities'), where('year', '==', year)),
+      (snap) => {
+        setActivities(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<DistrictActivity, 'id'>) }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'activities')
+    );
+
+    const u7 = onSnapshot(
+      query(collection(db, 'activityCompliances'), where('year', '==', year)),
+      (snap) => {
+        setActivityCompliances(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ActivityCompliance, 'id'>) }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'activityCompliances')
+    );
+
     return () => {
-      u1();
-      u2();
       u3();
       u4();
       u5();
       u6();
       u7();
-      u8();
     };
-  }, []);
+  }, [year]);
 
   useEffect(() => {
     setInspectingAnnual((prev) =>
@@ -499,8 +542,10 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
 
       const phone = editDirectorPhone.trim().slice(0, 30);
       const contactRef = doc(db, 'schoolContacts', editingSchoolId);
-      const existingContact = await getDoc(contactRef);
-      if (existingContact.exists()) {
+      const hasExistingContact = schoolContactsSubscribed
+        ? Boolean(schoolContacts[editingSchoolId])
+        : (await getDoc(contactRef)).exists();
+      if (hasExistingContact) {
         await updateDoc(contactRef, {
           directorPhone: phone,
           updatedByUid: profile.uid,
@@ -536,7 +581,12 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
       ops.push((b) => b.delete(doc(db, 'schools', target.id)));
       ops.push((b) => b.delete(doc(db, 'schoolContacts', target.id)));
 
-      const linkedUsers = users.filter((u) => u.schoolId === target.id);
+      const linkedUsers: Array<Pick<UserProfile, 'uid' | 'role' | 'saceCode'>> = usersSubscribed
+        ? users.filter((u) => u.schoolId === target.id)
+        : (
+            await getDocs(query(collection(db, 'users'), where('schoolId', '==', target.id)))
+          ).docs.map((d) => d.data() as UserProfile);
+
       for (const u of linkedUsers) {
         ops.push((b) =>
           b.update(doc(db, 'users', u.uid), {
@@ -554,25 +604,23 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
       }
 
       if (deleteSchoolReportsToo) {
-        for (const r of annualReports) {
-          if (r.schoolId === target.id) {
-            ops.push((b) => b.delete(doc(db, 'annualReports', r.id)));
-          }
+        const [annSnap, parteSnap, movSnap, compSnap] = await Promise.all([
+          getDocs(query(collection(db, 'annualReports'), where('schoolId', '==', target.id))),
+          getDocs(query(collection(db, 'parteMensualReports'), where('schoolId', '==', target.id))),
+          getDocs(query(collection(db, 'monthlyReports'), where('schoolId', '==', target.id))),
+          getDocs(query(collection(db, 'activityCompliances'), where('schoolId', '==', target.id))),
+        ]);
+        for (const d of annSnap.docs) {
+          ops.push((b) => b.delete(doc(db, 'annualReports', d.id)));
         }
-        for (const r of parteMensualReports) {
-          if (r.schoolId === target.id) {
-            ops.push((b) => b.delete(doc(db, 'parteMensualReports', r.id)));
-          }
+        for (const d of parteSnap.docs) {
+          ops.push((b) => b.delete(doc(db, 'parteMensualReports', d.id)));
         }
-        for (const r of monthlyReports) {
-          if (r.schoolId === target.id) {
-            ops.push((b) => b.delete(doc(db, 'monthlyReports', r.id)));
-          }
+        for (const d of movSnap.docs) {
+          ops.push((b) => b.delete(doc(db, 'monthlyReports', d.id)));
         }
-        for (const c of activityCompliances) {
-          if (c.schoolId === target.id) {
-            ops.push((b) => b.delete(doc(db, 'activityCompliances', c.id)));
-          }
+        for (const d of compSnap.docs) {
+          ops.push((b) => b.delete(doc(db, 'activityCompliances', d.id)));
         }
       }
 
@@ -655,11 +703,16 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
         });
       }
 
+      const isNewSchool = req.requestType === 'new_school' || !req.schoolId;
       const reqPhone = (req.directorPhone || '').trim().slice(0, 30);
       if (reqPhone && targetSchoolId) {
         const contactRef = doc(db, 'schoolContacts', targetSchoolId);
-        const contactSnap = await getDoc(contactRef);
-        if (contactSnap.exists()) {
+        const hasExistingContact = isNewSchool
+          ? false
+          : schoolContactsSubscribed
+          ? Boolean(schoolContacts[targetSchoolId])
+          : (await getDoc(contactRef)).exists();
+        if (hasExistingContact) {
           await updateDoc(contactRef, {
             directorPhone: reqPhone,
             updatedByUid: profile.uid,
@@ -819,8 +872,7 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
     };
 
     try {
-      const existingSnap = await getDoc(ref);
-      if (existingSnap.exists()) {
+      if (districtDeadlines) {
         await updateDoc(ref, payload);
       } else {
         await setDoc(ref, {
@@ -2464,6 +2516,9 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                         profile={profile}
                         readOnly={!editingInspectedReport}
                         reviewMode
+                        prefetchedReport={inspectingAnnual}
+                        prefetchedLoaded
+                        prefetchedParteMensualReports={parteMensualReports}
                       />
                     )}
                     {inspectingAnnual.level === 'media' && (
@@ -2474,6 +2529,9 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                         profile={profile}
                         readOnly={!editingInspectedReport}
                         reviewMode
+                        prefetchedReport={inspectingAnnual}
+                        prefetchedLoaded
+                        prefetchedParteMensualReports={parteMensualReports}
                       />
                     )}
                     {inspectingAnnual.level === 'prebasica' && (
@@ -2484,6 +2542,9 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                         profile={profile}
                         readOnly={!editingInspectedReport}
                         reviewMode
+                        prefetchedReport={inspectingAnnual}
+                        prefetchedLoaded
+                        prefetchedParteMensualReports={parteMensualReports}
                       />
                     )}
                   </>
@@ -2532,6 +2593,9 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                     profile={profile}
                     readOnly={!editingInspectedReport}
                     reviewMode
+                    prefetchedReport={inspectingParteMensual}
+                    prefetchedLoaded
+                    prefetchedParteMensualReports={parteMensualReports}
                   />
                 );
               })()}
@@ -2568,6 +2632,8 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                     profile={profile}
                     readOnly={!editingInspectedReport}
                     reviewMode
+                    prefetchedReport={inspectingMonthly}
+                    prefetchedLoaded
                   />
                 );
               })()}
@@ -2822,6 +2888,9 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
           parteMensualReports={parteMensualReports}
           monthlyReports={monthlyReports}
           annualReports={annualReports}
+          reportsLoaded={
+            yearReportsLoaded.parte && yearReportsLoaded.monthly && yearReportsLoaded.annual
+          }
           onGoToSchools={() => onSectionChange?.('schools')}
         />
       )}
@@ -3226,21 +3295,22 @@ export function AdminDashboard({ profile, activeSection, onSectionChange }: Admi
                 </p>
               )}
 
-              {linkedReportsTotal > 0 && (
-                <label className="flex items-start gap-2 text-xs text-slate-700 bg-slate-50 border border-slate-200 p-2.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={deleteSchoolReportsToo}
-                    onChange={(e) => setDeleteSchoolReportsToo(e.target.checked)}
-                    className="mt-0.5"
-                  />
-                  <span>
-                    Eliminar también los <strong>{linkedReportsTotal}</strong> registro(s) asociado(s)
-                    ({linkedParteCount} parte(s) mensual(es), {linkedMonthlyCount} movimiento(s),{' '}
-                    {linkedAnnualCount} cuadro(s) anual(es), {linkedComplianceCount} cumplimiento(s)).
-                  </span>
-                </label>
-              )}
+              <label className="flex items-start gap-2 text-xs text-slate-700 bg-slate-50 border border-slate-200 p-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={deleteSchoolReportsToo}
+                  onChange={(e) => setDeleteSchoolReportsToo(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>
+                  Eliminar también todos los reportes y cumplimientos históricos asociados a este
+                  centro
+                  {linkedReportsTotal > 0
+                    ? ` (${linkedReportsTotal} en ${year}: ${linkedParteCount} parte(s) mensual(es), ${linkedMonthlyCount} movimiento(s), ${linkedAnnualCount} cuadro(s) anual(es), ${linkedComplianceCount} cumplimiento(s))`
+                    : ' (incluyendo años anteriores)'}
+                  .
+                </span>
+              </label>
 
               <div className="flex items-center justify-end gap-2 pt-1">
                 <button

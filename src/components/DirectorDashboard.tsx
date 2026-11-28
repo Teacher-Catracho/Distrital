@@ -88,6 +88,11 @@ export function DirectorDashboard({
   const [allActivities, setAllActivities] = useState<DistrictActivity[]>([]);
   const [allActivityCompliances, setAllActivityCompliances] = useState<ActivityCompliance[]>([]);
   const [districtDeadlines, setDistrictDeadlines] = useState<DistrictDeadlines | null>(null);
+  const [loadedFlags, setLoadedFlags] = useState({
+    parte: false,
+    monthly: false,
+    annual: false,
+  });
 
   useEffect(() => {
     if (!availableLevels.includes(selectedLevel)) {
@@ -96,6 +101,8 @@ export function DirectorDashboard({
   }, [availableLevels, selectedLevel]);
 
   useEffect(() => {
+    setLoadedFlags({ parte: false, monthly: false, annual: false });
+
     const pQuery = query(
       collection(db, 'parteMensualReports'),
       where('directorUid', '==', profile.uid)
@@ -106,6 +113,7 @@ export function DirectorDashboard({
         setAllParteMensualReports(
           snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ParteMensualReport, 'id'>) }))
         );
+        setLoadedFlags((prev) => (prev.parte ? prev : { ...prev, parte: true }));
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'parteMensualReports')
     );
@@ -120,6 +128,7 @@ export function DirectorDashboard({
         setAllMonthlyReports(
           snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<MonthlyReport, 'id'>) }))
         );
+        setLoadedFlags((prev) => (prev.monthly ? prev : { ...prev, monthly: true }));
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'monthlyReports')
     );
@@ -134,6 +143,7 @@ export function DirectorDashboard({
         setAllAnnualReports(
           snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AnnualReport, 'id'>) }))
         );
+        setLoadedFlags((prev) => (prev.annual ? prev : { ...prev, annual: true }));
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'annualReports')
     );
@@ -216,6 +226,27 @@ export function DirectorDashboard({
   const activityCompliances = useMemo(
     () => allActivityCompliances.filter((c) => c.year === year),
     [allActivityCompliances, year]
+  );
+
+  const currentParteMensualReport = useMemo(
+    () =>
+      parteMensualReports.find(
+        (r) => r.month === selectedMonth && r.level === selectedLevel
+      ) ?? null,
+    [parteMensualReports, selectedMonth, selectedLevel]
+  );
+
+  const currentMonthlyReport = useMemo(
+    () =>
+      monthlyReports.find(
+        (r) => r.month === selectedMonth && r.level === selectedLevel
+      ) ?? null,
+    [monthlyReports, selectedMonth, selectedLevel]
+  );
+
+  const currentAnnualReport = useMemo(
+    () => annualReports.find((r) => r.level === selectedLevel) ?? null,
+    [annualReports, selectedLevel]
   );
 
   const pendingActivities = useMemo(() => {
@@ -633,6 +664,9 @@ export function DirectorDashboard({
           level={selectedLevel}
           school={school}
           profile={profile}
+          prefetchedReport={currentParteMensualReport}
+          prefetchedLoaded={loadedFlags.parte}
+          prefetchedParteMensualReports={parteMensualReports}
         />
       )}
 
@@ -643,19 +677,42 @@ export function DirectorDashboard({
           level={selectedLevel}
           school={school}
           profile={profile}
+          prefetchedReport={currentMonthlyReport}
+          prefetchedLoaded={loadedFlags.monthly}
         />
       )}
 
       {activeSection === 'annual' && selectedLevel === 'prebasica' && (
-        <PrebasicaAnnualEditor year={year} school={school} profile={profile} />
+        <PrebasicaAnnualEditor
+          year={year}
+          school={school}
+          profile={profile}
+          prefetchedReport={currentAnnualReport}
+          prefetchedLoaded={loadedFlags.annual}
+          prefetchedParteMensualReports={parteMensualReports}
+        />
       )}
 
       {activeSection === 'annual' && selectedLevel === 'basica' && (
-        <BasicaAnnualEditor year={year} school={school} profile={profile} />
+        <BasicaAnnualEditor
+          year={year}
+          school={school}
+          profile={profile}
+          prefetchedReport={currentAnnualReport}
+          prefetchedLoaded={loadedFlags.annual}
+          prefetchedParteMensualReports={parteMensualReports}
+        />
       )}
 
       {activeSection === 'annual' && selectedLevel === 'media' && (
-        <MediaAnnualEditor year={year} school={school} profile={profile} />
+        <MediaAnnualEditor
+          year={year}
+          school={school}
+          profile={profile}
+          prefetchedReport={currentAnnualReport}
+          prefetchedLoaded={loadedFlags.annual}
+          prefetchedParteMensualReports={parteMensualReports}
+        />
       )}
 
       {activeSection === 'history' && (

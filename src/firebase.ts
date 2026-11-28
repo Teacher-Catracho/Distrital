@@ -1,8 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import {
-  doc,
-  getDocFromServer,
+  CACHE_SIZE_UNLIMITED,
   getFirestore,
   initializeFirestore,
   persistentLocalCache,
@@ -35,6 +34,7 @@ function createFirestoreInstance(): Firestore {
       app,
       {
         localCache: persistentLocalCache({
+          cacheSizeBytes: CACHE_SIZE_UNLIMITED,
           tabManager: persistentMultipleTabManager(),
         }),
       },
@@ -113,15 +113,3 @@ export function handleFirestoreError(
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
-
-async function testConnection() {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error('Por favor verifica la configuración de Firebase.');
-    }
-  }
-}
-
-testConnection();

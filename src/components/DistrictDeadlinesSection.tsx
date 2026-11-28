@@ -8,7 +8,7 @@ import {
   Clock,
   Save,
 } from 'lucide-react';
-import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import type { DistrictDeadlines } from '../types/sace';
 import {
@@ -198,8 +198,7 @@ export function DistrictDeadlinesSection({
     };
 
     try {
-      const existingSnap = await getDoc(ref);
-      if (existingSnap.exists()) {
+      if (deadlines) {
         await updateDoc(ref, payload);
       } else {
         await setDoc(ref, {

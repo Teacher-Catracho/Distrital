@@ -54,6 +54,9 @@ interface ParteMensualEditorProps {
     total: ParteMensualComputedRow;
     avgDiasTrabajados: number;
   };
+  prefetchedReport?: ParteMensualReport | null;
+  prefetchedLoaded?: boolean;
+  prefetchedParteMensualReports?: ParteMensualReport[];
   onAfterSave?: () => void;
 }
 
@@ -68,6 +71,9 @@ export function ParteMensualEditor({
   reviewMode = false,
   isConsolidated = false,
   externalAggregate,
+  prefetchedReport,
+  prefetchedLoaded = false,
+  prefetchedParteMensualReports,
   onAfterSave,
 }: ParteMensualEditorProps) {
   const monthLabel = MONTHS.find((m) => m.value === month)?.label || String(month);
@@ -94,10 +100,59 @@ export function ParteMensualEditor({
   const [saving, setSaving] = useState(false);
   const [preloading, setPreloading] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [existingMeta, setExistingMeta] = useState<{
+    exists: boolean;
+    directorUid?: string;
+    reviewedByUid?: string;
+    reviewComment?: string;
+  }>({ exists: false });
 
   useEffect(() => {
     if (externalAggregate) {
       setDiasTrabajados(externalAggregate.avgDiasTrabajados);
+      setLoading(false);
+      return;
+    }
+
+    const applyLoadedReport = (d: ParteMensualReport | null) => {
+      if (d) {
+        const base = createEmptyParteMensualRows(level, effectiveBasicaScope);
+        for (const g of getParteMensualGrades(level, effectiveBasicaScope)) {
+          if (d.rows?.[g.key]) {
+            base[g.key] = {
+              matInicial: d.rows[g.key].matInicial || { n: 0, v: 0 },
+              inasistencias: d.rows[g.key].inasistencias || { n: 0, v: 0 },
+              ingresos: d.rows[g.key].ingresos || { n: 0, v: 0 },
+              traslados: d.rows[g.key].traslados || { n: 0, v: 0 },
+              desertores: d.rows[g.key].desertores || { n: 0, v: 0 },
+            };
+          }
+        }
+        setRows(base);
+        setDiasTrabajados(typeof d.diasTrabajados === 'number' ? d.diasTrabajados : 20);
+        setLugar(d.lugar || school.community || 'Omoa');
+        setDirectorName(d.directorName || school.directorDisplayName || profile.displayName);
+        setStatus(d.status || 'draft');
+        setReviewComment(d.reviewComment || '');
+        setExistingMeta({
+          exists: true,
+          directorUid: d.directorUid,
+          reviewedByUid: d.reviewedByUid,
+          reviewComment: d.reviewComment,
+        });
+      } else {
+        setRows(createEmptyParteMensualRows(level, effectiveBasicaScope));
+        setDiasTrabajados(20);
+        setLugar(school.community || 'Omoa');
+        setDirectorName(school.directorDisplayName || profile.displayName);
+        setStatus('draft');
+        setReviewComment('');
+        setExistingMeta({ exists: false });
+      }
+    };
+
+    if (prefetchedReport !== undefined && (prefetchedReport !== null || prefetchedLoaded)) {
+      applyLoadedReport(prefetchedReport);
       setLoading(false);
       return;
     }
@@ -110,34 +165,7 @@ export function ParteMensualEditor({
       try {
         const snap = await getDoc(doc(db, 'parteMensualReports', reportId));
         if (!active) return;
-        if (snap.exists()) {
-          const d = snap.data() as ParteMensualReport;
-          const base = createEmptyParteMensualRows(level, effectiveBasicaScope);
-          for (const g of getParteMensualGrades(level, effectiveBasicaScope)) {
-            if (d.rows?.[g.key]) {
-              base[g.key] = {
-                matInicial: d.rows[g.key].matInicial || { n: 0, v: 0 },
-                inasistencias: d.rows[g.key].inasistencias || { n: 0, v: 0 },
-                ingresos: d.rows[g.key].ingresos || { n: 0, v: 0 },
-                traslados: d.rows[g.key].traslados || { n: 0, v: 0 },
-                desertores: d.rows[g.key].desertores || { n: 0, v: 0 },
-              };
-            }
-          }
-          setRows(base);
-          setDiasTrabajados(typeof d.diasTrabajados === 'number' ? d.diasTrabajados : 20);
-          setLugar(d.lugar || school.community || 'Omoa');
-          setDirectorName(d.directorName || school.directorDisplayName || profile.displayName);
-          setStatus(d.status || 'draft');
-          setReviewComment(d.reviewComment || '');
-        } else {
-          setRows(createEmptyParteMensualRows(level, effectiveBasicaScope));
-          setDiasTrabajados(20);
-          setLugar(school.community || 'Omoa');
-          setDirectorName(school.directorDisplayName || profile.displayName);
-          setStatus('draft');
-          setReviewComment('');
-        }
+        applyLoadedReport(snap.exists() ? (snap.data() as ParteMensualReport) : null);
       } catch (err) {
         handleFirestoreError(err, OperationType.GET, path);
       } finally {
@@ -148,7 +176,17 @@ export function ParteMensualEditor({
     return () => {
       active = false;
     };
-  }, [reportId, level, effectiveBasicaScope, school.community, school.directorDisplayName, profile.displayName, externalAggregate]);
+  }, [
+    reportId,
+    level,
+    effectiveBasicaScope,
+    school.community,
+    school.directorDisplayName,
+    profile.displayName,
+    externalAggregate,
+    prefetchedReport,
+    prefetchedLoaded,
+  ]);
 
   const isAdminActor =
     profile.role === 'admin' || profile.adminPosition === 'asistente_tecnico';
@@ -214,19 +252,35 @@ export function ParteMensualEditor({
     const prevId = `${year}_${String(prevMonth).padStart(2, '0')}_${school.id}_${level}`;
     const prevLabel = MONTHS.find((m) => m.value === prevMonth)?.label || String(prevMonth);
     try {
-      const snap = await getDoc(doc(db, 'parteMensualReports', prevId));
-      if (!snap.exists()) {
+      let prevData: ParteMensualReport | undefined = prefetchedParteMensualReports?.find(
+        (r) =>
+          r.id === prevId ||
+          (r.year === year &&
+            r.month === prevMonth &&
+            r.schoolId === school.id &&
+            r.level === level)
+      );
+      if (!prevData && !prefetchedLoaded) {
+        const snap = await getDoc(doc(db, 'parteMensualReports', prevId));
+        if (snap.exists()) {
+          prevData = snap.data() as ParteMensualReport;
+        }
+      }
+      if (!prevData) {
         setFeedback({
           type: 'err',
           text: `No se encontró un Parte Mensual guardado para ${prevLabel} ${year} en ${getSchoolLevelLabel(level, effectiveBasicaScope)}.`,
         });
         return;
       }
-      const prevData = snap.data() as ParteMensualReport;
+      const resolvedPrev = prevData;
       setRows((prev) => {
         const next = { ...prev };
         for (const g of grades) {
-          const prevComp = computeParteMensualRow(prevData.rows?.[g.key], prevData.diasTrabajados || 0);
+          const prevComp = computeParteMensualRow(
+            resolvedPrev.rows?.[g.key],
+            resolvedPrev.diasTrabajados || 0
+          );
           next[g.key] = {
             ...(next[g.key] || createEmptyParteMensualRows(level, effectiveBasicaScope)[g.key]),
             matInicial: {
@@ -281,7 +335,6 @@ export function ParteMensualEditor({
     const path = `parteMensualReports/${reportId}`;
     try {
       const ref = doc(db, 'parteMensualReports', reportId);
-      const existing = await getDoc(ref);
       const cleanLugar = lugar.trim() || school.community || 'Omoa';
       const cleanDirector = directorName.trim() || school.directorDisplayName || profile.displayName;
       const validSchoolDirectorUid =
@@ -289,8 +342,19 @@ export function ParteMensualEditor({
           ? school.directorUid
           : '';
 
-      if (existing.exists()) {
-        const existingData = existing.data() as ParteMensualReport;
+      if (existingMeta.exists) {
+        const nextDirectorUid = validSchoolDirectorUid || existingMeta.directorUid || profile.uid;
+        const nextReviewedByUid =
+          targetStatus === 'approved'
+            ? profile.uid
+            : targetStatus === 'returned'
+            ? existingMeta.reviewedByUid || profile.uid
+            : '';
+        const nextReviewComment =
+          targetStatus === 'approved' || targetStatus === 'submitted'
+            ? ''
+            : existingMeta.reviewComment || '';
+
         await updateDoc(ref, {
           schoolName: school.name,
           saceCode: school.saceCode,
@@ -301,22 +365,22 @@ export function ParteMensualEditor({
           status: targetStatus,
           ...(isAdminActor
             ? {
-                directorUid: validSchoolDirectorUid || existingData.directorUid || profile.uid,
-                reviewedByUid:
-                  targetStatus === 'approved'
-                    ? profile.uid
-                    : targetStatus === 'returned'
-                    ? existingData.reviewedByUid || profile.uid
-                    : '',
-                reviewComment:
-                  targetStatus === 'approved' || targetStatus === 'submitted'
-                    ? ''
-                    : existingData.reviewComment || '',
+                directorUid: nextDirectorUid,
+                reviewedByUid: nextReviewedByUid,
+                reviewComment: nextReviewComment,
               }
             : {}),
           updatedAt: serverTimestamp(),
         });
+        setExistingMeta({
+          exists: true,
+          directorUid: isAdminActor ? nextDirectorUid : existingMeta.directorUid,
+          reviewedByUid: isAdminActor ? nextReviewedByUid : existingMeta.reviewedByUid,
+          reviewComment: isAdminActor ? nextReviewComment : existingMeta.reviewComment,
+        });
       } else {
+        const nextDirectorUid = validSchoolDirectorUid || profile.uid;
+        const nextReviewedByUid = isAdminActor && targetStatus === 'approved' ? profile.uid : '';
         await setDoc(ref, {
           year,
           month,
@@ -325,15 +389,21 @@ export function ParteMensualEditor({
           saceCode: school.saceCode,
           lugar: cleanLugar,
           level,
-          directorUid: validSchoolDirectorUid || profile.uid,
+          directorUid: nextDirectorUid,
           directorName: cleanDirector,
           diasTrabajados,
           rows,
           status: targetStatus,
           reviewComment: '',
-          reviewedByUid: isAdminActor && targetStatus === 'approved' ? profile.uid : '',
+          reviewedByUid: nextReviewedByUid,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
+        });
+        setExistingMeta({
+          exists: true,
+          directorUid: nextDirectorUid,
+          reviewedByUid: nextReviewedByUid,
+          reviewComment: '',
         });
       }
       setStatus(targetStatus);

@@ -445,6 +445,7 @@ export function ActivityComplianceAdmin({
         adminUid: profile.uid,
         completed: nextCompleted,
         note: overrideNote,
+        existingCompliance: existing ?? null,
       });
       setFeedbackMsg(
         overrideNote !== undefined

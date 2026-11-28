@@ -8,6 +8,24 @@ import {
 
 export const ANNUAL_SYNC_MONTHS = [4, 5, 6, 7, 8, 9, 10] as const;
 
+export function computeAnnualSummaryFromLoadedPartes(
+  reports: ParteMensualReport[],
+  year: number,
+  schoolId: string,
+  level: EducationLevel,
+  gradeKeys: string[]
+): ParteMensualAnnualSummary {
+  const monthSet = new Set<number>(ANNUAL_SYNC_MONTHS);
+  const matching = reports.filter(
+    (r) =>
+      r.year === year &&
+      r.schoolId === schoolId &&
+      r.level === level &&
+      monthSet.has(r.month)
+  );
+  return computeAnnualEstadisticoFromPartesMensuales(matching, gradeKeys);
+}
+
 export async function fetchAnnualSummaryFromParteMensual(
   year: number,
   schoolId: string,

@@ -125,7 +125,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsubAuth = onAuthStateChanged(auth, async (user) => {
+    const unsubAuth = onAuthStateChanged(auth, (user) => {
       setFirebaseUser(user);
       if (!user) {
         setProfile(null);
@@ -138,105 +138,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       setAuthError(null);
       setLoading(true);
-      try {
-        const userRef = doc(db, 'users', user.uid);
-        const adminRef = doc(db, 'admins', user.uid);
-        const [snap, adminSnap] = await Promise.all([getDoc(userRef), getDoc(adminRef)]);
-        const isPrimaryAdmin =
-          (user.email || '').toLowerCase() === PRIMARY_ADMIN_EMAIL.toLowerCase();
-        const hasAdminDoc = adminSnap.exists();
-        const adminDocData = hasAdminDoc
-          ? (adminSnap.data() as { position?: AdminPosition })
-          : null;
-        const resolvedAdminPosition: AdminPosition = isPrimaryAdmin
-          ? 'administrador'
-          : adminDocData?.position === 'asistente_tecnico' ||
-              (snap.exists() && snap.data().adminPosition === 'asistente_tecnico')
-            ? 'asistente_tecnico'
-            : 'administrador';
-
-        setIsAdminMember(isPrimaryAdmin || hasAdminDoc);
-
-        if (!snap.exists()) {
-          if (!isPrimaryAdmin && !hasAdminDoc) {
-            await signOut(auth).catch(() => {});
-            setProfile(null);
-            setIsAdminMember(false);
-            setLoading(false);
-            setAuthError(
-              'Tu cuenta no está registrada en la plataforma. Solicita tus credenciales a la Dirección Distrital.'
-            );
-            return;
-          }
-
-          try {
-            await setDoc(userRef, {
-              uid: user.uid,
-              email: user.email || (isPrimaryAdmin ? PRIMARY_ADMIN_EMAIL : ''),
-              displayName:
-                user.displayName ||
-                (resolvedAdminPosition === 'asistente_tecnico'
-                  ? 'Asistente Técnico Distrital'
-                  : 'Administrador Distrital'),
-              dni: isPrimaryAdmin ? PRIMARY_ADMIN_USERNAME : '',
-              role: 'admin',
-              adminPosition: resolvedAdminPosition,
-              needsOnboarding: false,
-              schoolId: '',
-              schoolName: '',
-              saceCode: isPrimaryAdmin ? PRIMARY_ADMIN_USERNAME : '',
-              createdAt: serverTimestamp(),
-              updatedAt: serverTimestamp(),
-            });
-          } catch (err) {
-            handleFirestoreError(err, OperationType.CREATE, `users/${user.uid}`);
-          }
-        } else if (
-          (isPrimaryAdmin || hasAdminDoc) &&
-          (snap.data().role !== 'admin' ||
-            snap.data().needsOnboarding === true ||
-            (hasAdminDoc && snap.data().adminPosition !== resolvedAdminPosition))
-        ) {
-          try {
-            await updateDoc(userRef, {
-              role: 'admin',
-              adminPosition: resolvedAdminPosition,
-              needsOnboarding: false,
-              updatedAt: serverTimestamp(),
-            });
-          } catch (err) {
-            handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);
-          }
-        }
-
-        if (isPrimaryAdmin && !hasAdminDoc) {
-          try {
-            await setDoc(adminRef, {
-              uid: user.uid,
-              email: user.email || PRIMARY_ADMIN_EMAIL,
-              displayName: user.displayName || 'Administrador Distrital',
-              position: 'administrador',
-              addedBy: 'system',
-              createdAt: serverTimestamp(),
-            });
-          } catch (err) {
-            handleFirestoreError(err, OperationType.CREATE, `admins/${user.uid}`);
-          }
-        }
-      } catch (err) {
-        console.error(err);
-        if (isFirestoreQuotaError(err)) {
-          await signOut(auth).catch(() => {});
-          setProfile(null);
-          setIsAdminMember(false);
-          setAuthError(QUOTA_ERROR_MESSAGE);
-        } else {
-          setAuthError(
-            err instanceof Error ? err.message : 'Error al inicializar el perfil de usuario.'
-          );
-        }
-        setLoading(false);
-      }
     });
 
     return () => unsubAuth();
@@ -245,18 +146,129 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!firebaseUser) return;
 
+    let active = true;
+    let bootstrapAttempted = false;
     const userPath = `users/${firebaseUser.uid}`;
+    const userRef = doc(db, 'users', firebaseUser.uid);
+    const adminRef = doc(db, 'admins', firebaseUser.uid);
+    const isPrimaryUser =
+      (firebaseUser.email || '').toLowerCase() === PRIMARY_ADMIN_EMAIL.toLowerCase();
+
     const unsubProfile = onSnapshot(
-      doc(db, 'users', firebaseUser.uid),
-      (snap) => {
-        if (snap.exists()) {
-          setProfile(snap.data() as UserProfile);
-          setLoading(false);
-        } else {
-          setLoading(false);
+      userRef,
+      async (snap) => {
+        if (!active) return;
+
+        if (!snap.exists()) {
+          if (bootstrapAttempted) return;
+          bootstrapAttempted = true;
+
+          try {
+            let hasAdminDoc = false;
+            let adminDocData: { position?: AdminPosition } | null = null;
+
+            if (!isPrimaryUser) {
+              const adminSnap = await getDoc(adminRef);
+              if (!active) return;
+              hasAdminDoc = adminSnap.exists();
+              adminDocData = hasAdminDoc
+                ? (adminSnap.data() as { position?: AdminPosition })
+                : null;
+            }
+
+            if (!isPrimaryUser && !hasAdminDoc) {
+              await signOut(auth).catch(() => {});
+              if (!active) return;
+              setProfile(null);
+              setIsAdminMember(false);
+              setLoading(false);
+              setAuthError(
+                'Tu cuenta no está registrada en la plataforma. Solicita tus credenciales a la Dirección Distrital.'
+              );
+              return;
+            }
+
+            const resolvedAdminPosition: AdminPosition = isPrimaryUser
+              ? 'administrador'
+              : adminDocData?.position === 'asistente_tecnico'
+              ? 'asistente_tecnico'
+              : 'administrador';
+
+            setIsAdminMember(true);
+            await setDoc(userRef, {
+              uid: firebaseUser.uid,
+              email: firebaseUser.email || (isPrimaryUser ? PRIMARY_ADMIN_EMAIL : ''),
+              displayName:
+                firebaseUser.displayName ||
+                (resolvedAdminPosition === 'asistente_tecnico'
+                  ? 'Asistente Técnico Distrital'
+                  : 'Administrador Distrital'),
+              dni: isPrimaryUser ? PRIMARY_ADMIN_USERNAME : '',
+              role: 'admin',
+              adminPosition: resolvedAdminPosition,
+              needsOnboarding: false,
+              schoolId: '',
+              schoolName: '',
+              saceCode: isPrimaryUser ? PRIMARY_ADMIN_USERNAME : '',
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            });
+
+            if (isPrimaryUser) {
+              await setDoc(adminRef, {
+                uid: firebaseUser.uid,
+                email: firebaseUser.email || PRIMARY_ADMIN_EMAIL,
+                displayName: firebaseUser.displayName || 'Administrador Distrital',
+                position: 'administrador',
+                addedBy: 'system',
+                createdAt: serverTimestamp(),
+              }).catch(() => {});
+            }
+          } catch (err) {
+            if (!active) return;
+            console.error(err);
+            if (isFirestoreQuotaError(err)) {
+              await signOut(auth).catch(() => {});
+              setProfile(null);
+              setIsAdminMember(false);
+              setAuthError(QUOTA_ERROR_MESSAGE);
+            } else {
+              handleFirestoreError(err, OperationType.WRITE, userPath);
+            }
+            setLoading(false);
+          }
+          return;
         }
+
+        const userData = snap.data() as UserProfile;
+        if (
+          isPrimaryUser &&
+          (userData.role !== 'admin' || userData.needsOnboarding === true) &&
+          !bootstrapAttempted
+        ) {
+          bootstrapAttempted = true;
+          updateDoc(userRef, {
+            role: 'admin',
+            adminPosition: 'administrador',
+            needsOnboarding: false,
+            updatedAt: serverTimestamp(),
+          }).catch((err) => {
+            if (!isFirestoreQuotaError(err)) {
+              console.error('Error syncing primary admin profile:', err);
+            }
+          });
+        }
+
+        setProfile(userData);
+        setIsAdminMember(
+          isPrimaryUser ||
+            userData.role === 'admin' ||
+            userData.adminPosition === 'asistente_tecnico'
+        );
+        setLoading(false);
       },
       (error) => {
+        if (!active) return;
         setLoading(false);
         if (isFirestoreQuotaError(error)) {
           setAuthError(QUOTA_ERROR_MESSAGE);
@@ -266,25 +278,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     );
 
-    const adminDocPath = `admins/${firebaseUser.uid}`;
-    const isPrimaryUser =
-      (firebaseUser.email || '').toLowerCase() === PRIMARY_ADMIN_EMAIL.toLowerCase();
-    const unsubAdminDoc = onSnapshot(
-      doc(db, 'admins', firebaseUser.uid),
-      (snap) => {
-        setIsAdminMember(isPrimaryUser || snap.exists());
-      },
-      (error) => {
-        if (isFirestoreQuotaError(error)) {
-          return;
-        }
-        handleFirestoreError(error, OperationType.GET, adminDocPath);
-      }
-    );
-
     return () => {
+      active = false;
       unsubProfile();
-      unsubAdminDoc();
     };
   }, [firebaseUser]);
 
